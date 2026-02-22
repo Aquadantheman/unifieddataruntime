@@ -4,7 +4,7 @@
 
 In 1980, Deleuze and Guattari contrasted the rhizome with the tree: hierarchies vs networks, central authority vs emergent coherence. Traditional databases are trees — leaders, followers, coordination. Rhizo is rhizomatic: every node commits locally, consistency emerges mathematically.
 
-**The first database where coordination is optional.**
+**Embedded versioned data engine** with cross-table ACID, zero-copy branching, and content-addressed deduplication.
 
 | Metric | Rhizo | Baseline | Improvement |
 |--------|-------|----------|-------------|
@@ -358,6 +358,14 @@ with db.engine.transaction() as tx:
 | **P.5** | **Arrow chunk cache** | **15x faster repeated reads** |
 
 Phase P.5 leverages content-addressed storage for cache-friendly reads. Since chunk hashes never change, cached Arrow RecordBatches require no invalidation and are shared across tables, versions, and branches. Cache hits bypass both disk I/O and Parquet decoding.
+
+### Deployment Model
+
+**Today:** Rhizo runs as an embedded library (like SQLite or DuckDB). Single-process, local storage, full feature set.
+
+**The path forward:** The coordination-free framework (algebraic transactions, Bloom filter conflict detection, gossip protocol) is implemented and validated via simulation testing. Multi-node deployment requires a networking layer not yet built.
+
+The architecture is designed for this transition — content-addressed storage, immutable chunks, and CRDT-style merge make distributed operation natural rather than bolted-on.
 
 ---
 
