@@ -760,3 +760,150 @@ def _backdate_version(env, table_name, version, seconds_ago):
 
     with open(version_path, "w") as f:
         json.dump(data, f)
+
+
+# ===========================================================================
+# TestBranchChunkSafety
+# ===========================================================================
+
+class TestBranchChunkSafety:
+    """Branch + chunk deduplication safety — validates Section 4.4.
+
+    Key scenario: Two branches share the same chunks (content-addressed).
+    When one branch's versions get GC'd, the shared chunks must survive
+    because the other branch still references them.
+    """
+
+    def test_shared_chunks_survive_partial_gc(self, gc_env):
+        """Chunks shared between branches survive when one branch is GC'd.
+
+        This is the critical test from Section 4.4 of the technical review:
+        "if two branches share chunks and one branch gets GC'd, do the
+        shared chunks survive?"
+        """
+        # Step 1: Write initial data on main
+        data1 = {"x": list(range(100)), "y": [f"val_{i}" for i in range(100)]}
+        result = _write_version(gc_env, "t1", data1)
+        v1 = result.version
+        assert v1 == 1
+
+        # Step 2: Create feature branch from main (shares v1's chunks)
+        gc_env["branch_mgr"].update_head("main", "t1", 1)
+        gc_env["branch_mgr"].create("feature", from_branch="main")
+
+        # Step 3: Write multiple new versions on main
+        for i in range(5):
+            new_data = {"x": list(range(i * 100, (i + 1) * 100))}
+            _write_version(gc_env, "t1", new_data)
+
+        # Now: main has v1-v6, feature branch head points at v1
+        # v1's chunks are shared between main and feature
+
+        # Step 4: Get v1's chunk hashes before GC
+        v1_info = gc_env["catalog"].get_version("t1", 1)
+        v1_chunks = set(v1_info.chunk_hashes)
+
+        # Step 5: GC main to keep only 2 versions (should delete v1-v4)
+        gc = _make_gc(gc_env)
+        result = gc.collect(GCPolicy(max_versions_per_table=2))
+
+        # v1 should be protected by feature branch head, but others deleted
+        versions_after = gc_env["catalog"].list_versions("t1")
+        assert 1 in versions_after, "v1 must survive (feature branch head)"
+        assert 6 in versions_after, "v6 must survive (latest)"
+
+        # Step 6: Verify v1's chunks still exist (critical check)
+        for chunk_hash in v1_chunks:
+            chunk_data = gc_env["store"].get(chunk_hash)
+            assert chunk_data is not None, f"Chunk {chunk_hash} should not be deleted"
+
+        # Step 7: Verify we can still read the data from v1
+        from rhizo.reader import TableReader
+        reader = TableReader(gc_env["store"], gc_env["catalog"])
+        df = reader.read_pandas("t1", version=1)
+        assert len(df) == 100
+        assert list(df["x"]) == list(range(100))
+
+    def test_gc_deletes_orphaned_chunks_after_branch_delete(self, gc_env):
+        """After deleting a branch, its exclusive chunks can be GC'd."""
+        # Step 1: Write data that creates unique chunks
+        data1 = {"x": list(range(100))}
+        _write_version(gc_env, "t1", data1)
+        gc_env["branch_mgr"].update_head("main", "t1", 1)
+
+        # Step 2: Create feature branch with different data
+        gc_env["branch_mgr"].create("feature", from_branch="main")
+        feature_data = {"x": list(range(1000, 1100))}  # Different data = different chunks
+        result = _write_version(gc_env, "t1", feature_data)
+        v2 = result.version
+        gc_env["branch_mgr"].update_head("feature", "t1", v2)
+
+        # Get v2's chunks (unique to feature branch)
+        v2_info = gc_env["catalog"].get_version("t1", v2)
+        v2_chunks = set(v2_info.chunk_hashes)
+
+        # Step 3: Delete feature branch
+        gc_env["branch_mgr"].delete("feature")
+
+        # Step 4: Write more on main to make v2 old
+        for i in range(3):
+            _write_version(gc_env, "t1", {"x": [i]})
+
+        # Step 5: GC should now be able to delete v2 and its chunks
+        gc = _make_gc(gc_env)
+        result = gc.collect(GCPolicy(max_versions_per_table=1))
+
+        # v2 should be deleted (no branch references it anymore)
+        versions_after = gc_env["catalog"].list_versions("t1")
+        assert v2 not in versions_after, "v2 should be deleted after branch removal"
+
+        # v2's unique chunks should also be deleted (phase 2 sweep removes orphans)
+        # After branch deletion and GC, the orphaned chunks are cleaned up
+        chunks_deleted = 0
+        for chunk_hash in v2_chunks:
+            try:
+                gc_env["store"].get(chunk_hash)
+            except OSError:
+                chunks_deleted += 1
+
+        # At least some chunks should be deleted (the unique ones)
+        # This confirms GC correctly identifies and sweeps orphaned chunks
+        assert chunks_deleted > 0, "GC should delete orphaned chunks after branch removal"
+
+    def test_content_addressed_dedup_across_branches(self, gc_env):
+        """Identical data on different branches shares chunks (dedup works)."""
+        # Write same data twice
+        data = {"x": list(range(50)), "y": ["test"] * 50}
+
+        result1 = _write_version(gc_env, "t1", data)
+        v1 = result1.version
+        gc_env["branch_mgr"].update_head("main", "t1", v1)
+
+        # Create feature branch
+        gc_env["branch_mgr"].create("feature", from_branch="main")
+
+        # Write identical data on feature branch
+        result2 = _write_version(gc_env, "t1", data)
+        v2 = result2.version
+        gc_env["branch_mgr"].update_head("feature", "t1", v2)
+
+        # Both versions should share chunk hashes (content-addressed)
+        v1_info = gc_env["catalog"].get_version("t1", v1)
+        v2_info = gc_env["catalog"].get_version("t1", v2)
+
+        v1_chunks = set(v1_info.chunk_hashes)
+        v2_chunks = set(v2_info.chunk_hashes)
+
+        assert v1_chunks == v2_chunks, "Identical data should produce identical chunks"
+
+        # GC with aggressive policy
+        gc = _make_gc(gc_env)
+        result = gc.collect(GCPolicy(max_versions_per_table=1))
+
+        # Both branch heads are protected, so both versions survive
+        versions_after = gc_env["catalog"].list_versions("t1")
+        assert v1 in versions_after, "v1 protected by main head"
+        assert v2 in versions_after, "v2 protected by feature head"
+
+        # Chunks should not be deleted (referenced by both)
+        assert result.chunks_deleted == 0
