@@ -166,7 +166,6 @@ class TestParquetExport:
         from _rhizo import PyChunkStore, PyCatalog
         from rhizo.writer import TableWriter
         from rhizo.reader import TableReader
-        from rhizo.export import ExportEngine
 
         chunks_dir = os.path.join(temp_db_path, "mc_chunks")
         catalog_dir = os.path.join(temp_db_path, "mc_catalog")

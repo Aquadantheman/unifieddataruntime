@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     import _rhizo
     from .transaction import TransactionContext
     from .subscriber import Subscriber
+    from .export import ExportResult
 
 
 # Backwards-compatible alias for the shared validation function
