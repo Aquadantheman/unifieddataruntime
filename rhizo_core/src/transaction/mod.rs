@@ -24,7 +24,11 @@ pub use types::{
 pub use epoch::{EpochConfig, EpochStatus, EpochMetadata};
 pub use error::TransactionError;
 pub use log::TransactionLog;
-pub use conflict::{Conflict, ConflictDetector, TableLevelConflictDetector};
+pub use conflict::{
+    Conflict, ConflictDetector, TableLevelConflictDetector,
+    PartitionLevelConflictDetector, BloomFilter, BloomWriteSet,
+    BloomFilterConflictDetector, RowLevelConflictDetector, AdaptiveConflictDetector,
+};
 pub use manager::TransactionManager;
 pub use recovery::{RecoveryReport, RecoveryManager};
 pub use coordination_free::{

@@ -1,0 +1,128 @@
+{
+  "tpcc": {
+    "throughput_ops_sec": 921.1658486152984,
+    "avg_latency_ms": 1.0826565566557835,
+    "p50_latency_ms": 0.022399937734007835,
+    "p99_latency_ms": 2.8495999285951257,
+    "p999_latency_ms": 3.520500031299889,
+    "coordination_free_pct": 92.41437353629976,
+    "errors": 0
+  },
+  "ycsb_A": {
+    "throughput_ops_sec": 839.6564344470983,
+    "avg_latency_ms": 1.1850489284344283,
+    "p50_latency_ms": 2.024899935349822,
+    "p99_latency_ms": 2.813400002196431,
+    "p999_latency_ms": 3.176500089466572,
+    "coordination_free_pct": 49.595238095238095,
+    "errors": 0
+  },
+  "ycsb_B": {
+    "throughput_ops_sec": 8509.6803794374,
+    "avg_latency_ms": 0.11603360984237454,
+    "p50_latency_ms": 0.000400003045797348,
+    "p99_latency_ms": 2.5296000530943274,
+    "p999_latency_ms": 2.8028000378981233,
+    "coordination_free_pct": 95.04652692922268,
+    "errors": 0
+  },
+  "ycsb_C": {
+    "throughput_ops_sec": 825848.6009048835,
+    "avg_latency_ms": 0.00022862512708955116,
+    "p50_latency_ms": 0.000200001522898674,
+    "p99_latency_ms": 0.000600004568696022,
+    "p999_latency_ms": 0.001500011421740055,
+    "coordination_free_pct": 100.0,
+    "errors": 0
+  },
+  "ycsb_G": {
+    "throughput_ops_sec": 338564.48861976835,
+    "avg_latency_ms": 0.0014974427015847492,
+    "p50_latency_ms": 0.001300009898841381,
+    "p99_latency_ms": 0.002800021320581436,
+    "p999_latency_ms": 0.016000005416572094,
+    "coordination_free_pct": 100.0,
+    "errors": 0
+  },
+  "coord_free_100": {
+    "throughput_ops_sec": 645714.6376008375,
+    "avg_latency_ms": 0.0014322998700663447,
+    "p50_latency_ms": 0.001200009137392044,
+    "p99_latency_ms": 0.0036999117583036423,
+    "p999_latency_ms": 0.02410006709396839,
+    "coordination_free_pct": 100.0,
+    "errors": 0
+  },
+  "coord_required_100": {
+    "throughput_ops_sec": 427.77127249037727,
+    "avg_latency_ms": 2.337033619591966,
+    "p50_latency_ms": 2.2744000889360905,
+    "p99_latency_ms": 2.952899900265038,
+    "p999_latency_ms": 3.658799920231104,
+    "coordination_free_pct": 0.0,
+    "errors": 0
+  },
+  "mixed_0": {
+    "throughput_ops_sec": 426.3023166093253,
+    "avg_latency_ms": 2.345128420065157,
+    "p50_latency_ms": 2.292899996973574,
+    "p99_latency_ms": 3.028700011782348,
+    "p999_latency_ms": 4.127899999730289,
+    "coordination_free_pct": 0.0,
+    "errors": 0
+  },
+  "mixed_25": {
+    "throughput_ops_sec": 567.013241570906,
+    "avg_latency_ms": 1.7630810798378662,
+    "p50_latency_ms": 2.1907000336796045,
+    "p99_latency_ms": 2.9359000036492944,
+    "p999_latency_ms": 4.553000093437731,
+    "coordination_free_pct": 24.84,
+    "errors": 0
+  },
+  "mixed_50": {
+    "throughput_ops_sec": 849.7729726785982,
+    "avg_latency_ms": 1.1762873999075965,
+    "p50_latency_ms": 2.0158999832347035,
+    "p99_latency_ms": 2.852599951438606,
+    "p999_latency_ms": 3.5200000274926424,
+    "coordination_free_pct": 49.88,
+    "errors": 0
+  },
+  "mixed_75": {
+    "throughput_ops_sec": 1639.6976669817598,
+    "avg_latency_ms": 0.6095084597356617,
+    "p50_latency_ms": 0.002900022082030773,
+    "p99_latency_ms": 2.727300045080483,
+    "p999_latency_ms": 3.2127000158652663,
+    "coordination_free_pct": 74.02,
+    "errors": 0
+  },
+  "mixed_90": {
+    "throughput_ops_sec": 4561.923900355835,
+    "avg_latency_ms": 0.2189041598699987,
+    "p50_latency_ms": 0.001300009898841381,
+    "p99_latency_ms": 2.6108999736607075,
+    "p999_latency_ms": 2.9426999390125275,
+    "coordination_free_pct": 90.75999999999999,
+    "errors": 0
+  },
+  "mixed_95": {
+    "throughput_ops_sec": 7371.51574374152,
+    "avg_latency_ms": 0.13534892005845905,
+    "p50_latency_ms": 0.001300009898841381,
+    "p99_latency_ms": 2.5725000305101275,
+    "p999_latency_ms": 3.381800022907555,
+    "coordination_free_pct": 94.42,
+    "errors": 0
+  },
+  "mixed_100": {
+    "throughput_ops_sec": 668329.7746900794,
+    "avg_latency_ms": 0.001329519832506776,
+    "p50_latency_ms": 0.001100008375942707,
+    "p99_latency_ms": 0.002300017513334751,
+    "p999_latency_ms": 0.026499968953430653,
+    "coordination_free_pct": 100.0,
+    "errors": 0
+  }
+}

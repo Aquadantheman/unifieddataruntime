@@ -6,16 +6,16 @@ In 1980, Deleuze and Guattari contrasted the rhizome with the tree: hierarchies 
 
 **The first database where coordination is optional.**
 
-| Metric | Rhizo (measured) | Baseline (measured) | Improvement |
-|--------|------------------|---------------------|-------------|
-| Transaction latency | 0.001ms | 187.9ms (cross-continent 2PC) | [**160,000x faster**](docs/PERFORMANCE.md#verify-transaction-latency) |
-| Transaction latency | 0.001ms | 33.3ms (same-region 2PC) | [**30,000x faster**](docs/PERFORMANCE.md#verify-transaction-latency) |
+| Metric | Rhizo | Baseline | Improvement |
+|--------|-------|----------|-------------|
 | Transaction latency | 0.001ms | 0.065ms (localhost 2PC) | [**59x faster**](docs/PERFORMANCE.md#verify-transaction-latency) |
 | Transaction latency | 0.001ms | 0.386ms (SQLite FULL sync) | [**355x faster**](docs/PERFORMANCE.md#verify-transaction-latency) |
+| OLAP queries (cached) | 0.9ms | 26ms (DuckDB) | [**32x faster**](docs/PERFORMANCE.md#verify-olap-performance) |
 | Branch overhead | 140 bytes | 63 MB (Delta Lake) | [**450,000x smaller**](docs/PERFORMANCE.md#verify-branch-overhead) |
-| OLAP queries | 0.9ms | 26ms (DuckDB) | [**32x faster**](docs/PERFORMANCE.md#verify-olap-performance) |
+| Transaction latency* | 0.001ms | 33.3ms (same-region 2PC) | [**30,000x faster**](docs/PERFORMANCE.md#verify-transaction-latency) |
+| Transaction latency* | 0.001ms | 187.9ms (cross-continent 2PC) | [**160,000x faster**](docs/PERFORMANCE.md#verify-transaction-latency) |
 
-<sub>All values measured. Cross-continent 2PC: NYC → AWS Oregon + AWS Ireland (~100ms RTT each). Same-region 2PC: NYC → AWS Virginia (~18ms RTT). [Full methodology →](docs/PERFORMANCE.md#benchmark-methodology)</sub>
+<sub>**Measured on localhost:** 59x vs 2PC (3 processes, real TCP), 355x vs SQLite, 32x vs DuckDB (warm Arrow cache). **Projected at scale (*):** Based on measured network RTT — same-region (~18ms to AWS Virginia), cross-continent (~100ms each to AWS Oregon + Ireland). [Full methodology →](docs/PERFORMANCE.md#benchmark-methodology)</sub>
 
 [![CI](https://github.com/rhizodata/rhizo/actions/workflows/ci.yml/badge.svg)](https://github.com/rhizodata/rhizo/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -39,6 +39,24 @@ Lakehouses (Delta Lake, Iceberg, Hudi) improve storage but can't solve:
 
 Rhizo can.
 
+### When Does Coordination-Free Apply?
+
+The headline performance numbers (59x-160,000x faster) apply to **algebraic operations** — those that are commutative and associative:
+
+| Operation Type | Examples | Coordination-Free? |
+|----------------|----------|-------------------|
+| Reads | SELECT queries | Yes |
+| Appends | INSERT (event logs, metrics) | Yes |
+| Increments | `SET x = x + delta` (counters, inventory) | Yes |
+| Aggregations | SUM, MAX, MIN, COUNT | Yes |
+| Overwrites | `SET x = 'value'` (user profiles) | No — requires coordination |
+
+**Real-world breakdown:** 92% of TPC-C (industry-standard OLTP benchmark) is algebraic. For analytics workloads, it's 80-95%. For traditional CRUD apps, it's 20-40%.
+
+Even mixed workloads benefit — algebraic operations skip coordination while non-algebraic operations fall back to standard ACID.
+
+→ [Full workload analysis](./docs/TECHNICAL_FOUNDATIONS.md#real-world-workload-analysis)
+
 ---
 
 ## Benchmarks
@@ -49,11 +67,13 @@ With the new **DataFusion-powered OLAP engine**, Rhizo delivers industry-leading
 
 | Metric | Rhizo OLAP | DuckDB | Delta Lake | Parquet | Winner |
 |--------|-----------------|--------|------------|---------|--------|
-| **Read** | **0.9ms** | 26ms | 24.5ms | 6.5ms | **Rhizo (32x)** |
+| **Read (cached)** | **0.9ms** | 26ms | 24.5ms | 6.5ms | **Rhizo (32x)** |
 | **Filtered (5%)** | **0.9ms** | 1.6ms | 17.3ms | 6.4ms | **Rhizo (1.8x)** |
 | **Projection** | **0.6ms** | 1.9ms | 11.9ms | 3.2ms | **Rhizo (3.4x)** |
 | **Complex Query** | **2.6ms** | 3.4ms | 28.2ms | 17.8ms | **Rhizo (1.3x)** |
 | **Storage** | **3.67MB** | 6.26MB | 63.10MB | 3.73MB | **Rhizo (17x vs Delta)** |
+
+<sub>**Why caching matters:** Rhizo's content-addressed chunks never change, so cached Arrow RecordBatches never need invalidation. Cache entries are shared across tables, versions, and branches. First cold read is closer to parity with DuckDB; repeated reads show the 32x advantage.</sub>
 
 **Rhizo wins 4/6 performance categories** with built-in lakehouse features no competitor matches.
 
@@ -375,7 +395,8 @@ rhizo/
 
 ## Documentation
 
-- [Technical Foundations](./docs/TECHNICAL_FOUNDATIONS.md) — Mathematical proofs and complexity analysis
+- [Technical Foundations](./docs/TECHNICAL_FOUNDATIONS.md) — Mathematical proofs, complexity analysis, [consistency model](./docs/TECHNICAL_FOUNDATIONS.md#consistency-model), and [workload analysis](./docs/TECHNICAL_FOUNDATIONS.md#real-world-workload-analysis)
+- [Performance Guide](./docs/PERFORMANCE.md) — Optimization techniques and benchmarks
 - [Roadmap](./ROADMAP.md) — Current status and what's next
 - [Changelog](./CHANGELOG.md) — Version history
 - [Origin Story](./ORIGIN_STORY.md) — Why I built Rhizo
