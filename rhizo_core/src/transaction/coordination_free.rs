@@ -45,6 +45,9 @@ use crate::distributed::{
     AlgebraicTransaction, LocalCommitError, LocalCommitProtocol, NodeId, VectorClock,
     VersionedUpdate,
 };
+use super::speculative::{
+    SpeculativeBuffer, SpeculativeConfig, SpeculativeCommitResult, SpeculativeMetrics,
+};
 
 /// Error type for coordination-free operations
 #[derive(Debug, thiserror::Error)]
@@ -94,8 +97,15 @@ impl Default for CoordinationFreeConfig {
 /// This manager maintains:
 /// - A vector clock for causality tracking
 /// - The node's identity
-/// - Local state for algebraic operations
+/// - Local state for algebraic operations (confirmed)
+/// - Speculative buffer for tentative commits (POAC speculative execution)
 /// - Configuration for validation
+///
+/// # Speculative Execution
+///
+/// When enabled, the manager can speculatively commit transactions with low
+/// conflict probability, confirming them asynchronously. This implements
+/// POAC Paper Section 4 with safety guarantees from `speculative_safety_proof.md`.
 pub struct CoordinationFreeManager {
     /// This node's identifier
     node_id: NodeId,
@@ -109,8 +119,13 @@ pub struct CoordinationFreeManager {
     /// Committed updates (for replay/recovery)
     committed_updates: RwLock<Vec<VersionedUpdate>>,
 
-    /// Current local state (key -> (op_type, value))
+    /// Current local state (key -> (op_type, value)) - CONFIRMED state only
+    /// This is the "confirmed store" from the visibility invariant
     local_state: RwLock<std::collections::HashMap<String, (OpType, AlgebraicValue)>>,
+
+    /// Speculative buffer for tentative commits (POAC speculative execution)
+    /// This is isolated from local_state to maintain the visibility invariant
+    speculative_buffer: RwLock<SpeculativeBuffer>,
 }
 
 impl CoordinationFreeManager {
@@ -127,6 +142,23 @@ impl CoordinationFreeManager {
             config,
             committed_updates: RwLock::new(Vec::new()),
             local_state: RwLock::new(std::collections::HashMap::new()),
+            speculative_buffer: RwLock::new(SpeculativeBuffer::new()),
+        }
+    }
+
+    /// Create a new coordination-free manager with custom speculative config
+    pub fn with_speculative_config(
+        node_id: NodeId,
+        config: CoordinationFreeConfig,
+        spec_config: SpeculativeConfig,
+    ) -> Self {
+        Self {
+            node_id,
+            clock: RwLock::new(VectorClock::new()),
+            config,
+            committed_updates: RwLock::new(Vec::new()),
+            local_state: RwLock::new(std::collections::HashMap::new()),
+            speculative_buffer: RwLock::new(SpeculativeBuffer::with_config(spec_config)),
         }
     }
 
@@ -310,6 +342,206 @@ impl CoordinationFreeManager {
 
         Ok(())
     }
+
+    // =========================================================================
+    // Speculative Execution (POAC Paper Section 4)
+    // =========================================================================
+
+    /// Commit a transaction, potentially speculatively.
+    ///
+    /// This method implements the POAC speculative execution protocol:
+    /// 1. If conflict probability < threshold, commit speculatively
+    /// 2. If conflict probability >= threshold, commit eagerly (immediately to confirmed)
+    ///
+    /// # Returns
+    ///
+    /// Returns a `SpeculativeCommitResult` indicating:
+    /// - Whether the commit was speculative or eager
+    /// - The commit ID (for tracking speculative commits)
+    /// - The conflict probability estimate
+    ///
+    /// # Safety
+    ///
+    /// Speculative commits are isolated from reads (visibility invariant).
+    /// Use `confirm_speculative()` or `rollback_speculative()` to resolve.
+    pub fn commit_with_speculation(
+        &self,
+        tx: &AlgebraicTransaction,
+    ) -> Result<SpeculativeCommitResult, CoordinationFreeError> {
+        // Validate transaction is fully algebraic
+        if self.config.require_fully_algebraic && !tx.is_fully_algebraic() {
+            return Err(CoordinationFreeError::NotFullyAlgebraic);
+        }
+
+        // Get keys for probability estimation
+        let keys: Vec<String> = tx.operations().iter().map(|op| op.key().to_string()).collect();
+
+        // Check if we should speculate
+        let should_speculate = {
+            let buffer = self
+                .speculative_buffer
+                .read()
+                .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
+            buffer.should_speculate(&keys)
+        };
+
+        // Get write lock on clock
+        let mut clock = self
+            .clock
+            .write()
+            .map_err(|_| CoordinationFreeError::LockError("clock".to_string()))?;
+
+        // Create the versioned update
+        let update = LocalCommitProtocol::commit_local(tx, &self.node_id, &mut clock)?;
+
+        if should_speculate {
+            // Speculative path: add to speculative buffer, don't apply to confirmed state
+            let mut buffer = self
+                .speculative_buffer
+                .write()
+                .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
+
+            let conflict_probability = buffer.conflict_tracker().estimate_probability(&keys);
+            let commit_id = buffer.add_speculative(update.clone());
+
+            Ok(SpeculativeCommitResult {
+                commit_id,
+                is_speculative: true,
+                conflict_probability,
+                update,
+            })
+        } else {
+            // Eager path: commit directly to confirmed state
+            self.apply_update_to_state(&update)?;
+
+            // Store update for replay
+            {
+                let mut committed = self
+                    .committed_updates
+                    .write()
+                    .map_err(|_| CoordinationFreeError::LockError("committed_updates".to_string()))?;
+                committed.push(update.clone());
+            }
+
+            Ok(SpeculativeCommitResult {
+                commit_id: 0, // Eager commits don't need tracking
+                is_speculative: false,
+                conflict_probability: 1.0, // High probability triggered eager
+                update,
+            })
+        }
+    }
+
+    /// Confirm a speculative commit (promote to confirmed state).
+    ///
+    /// Call this when no conflict was detected for the speculative commit.
+    ///
+    /// # Returns
+    ///
+    /// Returns the versioned update on success, or None if commit_id not found.
+    pub fn confirm_speculative(
+        &self,
+        commit_id: u64,
+    ) -> Result<Option<VersionedUpdate>, CoordinationFreeError> {
+        let update = {
+            let mut buffer = self
+                .speculative_buffer
+                .write()
+                .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
+            buffer.confirm(commit_id)
+        };
+
+        if let Some(ref update) = update {
+            // Apply to confirmed state
+            self.apply_update_to_state(update)?;
+
+            // Store update for replay
+            {
+                let mut committed = self
+                    .committed_updates
+                    .write()
+                    .map_err(|_| CoordinationFreeError::LockError("committed_updates".to_string()))?;
+                committed.push(update.clone());
+            }
+        }
+
+        Ok(update)
+    }
+
+    /// Rollback a speculative commit (discard from buffer).
+    ///
+    /// Call this when a conflict was detected for the speculative commit.
+    ///
+    /// # Returns
+    ///
+    /// Returns true if the commit was found and rolled back.
+    pub fn rollback_speculative(&self, commit_id: u64) -> Result<bool, CoordinationFreeError> {
+        let mut buffer = self
+            .speculative_buffer
+            .write()
+            .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
+        Ok(buffer.rollback(commit_id))
+    }
+
+    /// Check pending speculative commits for conflicts against recent confirmed transactions.
+    ///
+    /// # Returns
+    ///
+    /// Returns a list of (commit_id, has_conflict) pairs.
+    pub fn check_pending_conflicts(&self) -> Result<Vec<(u64, bool)>, CoordinationFreeError> {
+        let buffer = self
+            .speculative_buffer
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
+
+        let state = self
+            .local_state
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("local_state".to_string()))?;
+
+        // Get confirmed keys
+        let confirmed_keys: Vec<String> = state.keys().cloned().collect();
+
+        // Check each pending commit
+        let pending_ids = buffer.pending_commit_ids();
+        let results: Vec<(u64, bool)> = pending_ids
+            .iter()
+            .map(|&id| {
+                let has_conflict = buffer.check_conflict(id, &confirmed_keys);
+                (id, has_conflict)
+            })
+            .collect();
+
+        Ok(results)
+    }
+
+    /// Get metrics for speculative execution.
+    pub fn speculative_metrics(&self) -> Result<SpeculativeMetrics, CoordinationFreeError> {
+        let buffer = self
+            .speculative_buffer
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
+
+        let tracker = buffer.conflict_tracker();
+
+        Ok(SpeculativeMetrics {
+            total_speculated: 0, // TODO: Track this
+            total_eager: 0,      // TODO: Track this
+            confirmed: 0,        // TODO: Track this
+            rolled_back: 0,      // TODO: Track this
+            pending: buffer.pending_count() as u64,
+            conflict_rate: tracker.global_conflict_rate(),
+        })
+    }
+
+    /// Get the number of pending speculative commits.
+    pub fn pending_speculative_count(&self) -> Result<usize, CoordinationFreeError> {
+        let buffer = self
+            .speculative_buffer
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
+        Ok(buffer.pending_count())
+    }
 }
 
 #[cfg(test)]
@@ -491,5 +723,131 @@ mod tests {
         manager.commit_local(&tx).unwrap();
 
         assert_eq!(manager.update_count().unwrap(), 1);
+    }
+
+    // =========================================================================
+    // Speculative Execution Tests
+    // =========================================================================
+
+    #[test]
+    fn test_speculative_commit_low_conflict() {
+        // With default config, new keys should speculate (low conflict probability)
+        let manager = CoordinationFreeManager::new(NodeId::new("node-1"));
+
+        let mut tx = AlgebraicTransaction::new();
+        tx.add_operation(add_op("new_key", 100));
+
+        let result = manager.commit_with_speculation(&tx).unwrap();
+
+        // Should be speculative (default probability is low)
+        assert!(result.is_speculative);
+        assert!(result.commit_id > 0);
+
+        // Confirmed state should NOT have the value (visibility invariant)
+        assert!(manager.get_state("new_key").unwrap().is_none());
+
+        // Should have 1 pending commit
+        assert_eq!(manager.pending_speculative_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_speculative_confirm() {
+        let manager = CoordinationFreeManager::new(NodeId::new("node-1"));
+
+        let mut tx = AlgebraicTransaction::new();
+        tx.add_operation(add_op("counter", 50));
+
+        let result = manager.commit_with_speculation(&tx).unwrap();
+        assert!(result.is_speculative);
+
+        // Confirm the speculative commit
+        let confirmed = manager.confirm_speculative(result.commit_id).unwrap();
+        assert!(confirmed.is_some());
+
+        // Now confirmed state should have the value
+        let value = manager.get_state("counter").unwrap().unwrap();
+        assert_eq!(value.as_integer(), Some(50));
+
+        // No more pending commits
+        assert_eq!(manager.pending_speculative_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_speculative_rollback() {
+        let manager = CoordinationFreeManager::new(NodeId::new("node-1"));
+
+        let mut tx = AlgebraicTransaction::new();
+        tx.add_operation(add_op("counter", 50));
+
+        let result = manager.commit_with_speculation(&tx).unwrap();
+        assert!(result.is_speculative);
+
+        // Rollback the speculative commit
+        let rolled_back = manager.rollback_speculative(result.commit_id).unwrap();
+        assert!(rolled_back);
+
+        // Confirmed state should NOT have the value
+        assert!(manager.get_state("counter").unwrap().is_none());
+
+        // No more pending commits
+        assert_eq!(manager.pending_speculative_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_visibility_invariant() {
+        // This test verifies the core safety property: speculative writes
+        // are not visible to reads (get_state only reads confirmed store)
+        let manager = CoordinationFreeManager::new(NodeId::new("node-1"));
+
+        // Speculative commit
+        let mut tx1 = AlgebraicTransaction::new();
+        tx1.add_operation(add_op("isolated", 100));
+        let spec_result = manager.commit_with_speculation(&tx1).unwrap();
+        assert!(spec_result.is_speculative);
+
+        // Read should not see speculative value
+        assert!(manager.get_state("isolated").unwrap().is_none());
+
+        // Eager commit (use commit_local which always commits to confirmed)
+        let mut tx2 = AlgebraicTransaction::new();
+        tx2.add_operation(add_op("visible", 200));
+        manager.commit_local(&tx2).unwrap();
+
+        // Eager commit should be visible
+        let value = manager.get_state("visible").unwrap().unwrap();
+        assert_eq!(value.as_integer(), Some(200));
+
+        // Speculative still not visible
+        assert!(manager.get_state("isolated").unwrap().is_none());
+
+        // After confirm, speculative becomes visible
+        manager.confirm_speculative(spec_result.commit_id).unwrap();
+        let value = manager.get_state("isolated").unwrap().unwrap();
+        assert_eq!(value.as_integer(), Some(100));
+    }
+
+    #[test]
+    fn test_speculative_with_custom_config() {
+        use crate::transaction::speculative::SpeculativeConfig;
+
+        // Disable speculation
+        let disabled_config = SpeculativeConfig::disabled();
+        let manager = CoordinationFreeManager::with_speculative_config(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            disabled_config,
+        );
+
+        let mut tx = AlgebraicTransaction::new();
+        tx.add_operation(add_op("key", 10));
+
+        let result = manager.commit_with_speculation(&tx).unwrap();
+
+        // Should NOT be speculative (disabled)
+        assert!(!result.is_speculative);
+
+        // Value should be immediately visible
+        let value = manager.get_state("key").unwrap().unwrap();
+        assert_eq!(value.as_integer(), Some(10));
     }
 }

@@ -7,6 +7,7 @@
 //! - `EpochConfig` / `EpochMetadata` - Epoch-based organization
 //! - `ConflictDetector` - Pluggable conflict detection strategies
 //! - `CoordinationFreeManager` - Coordination-free mode for algebraic operations
+//! - `SpeculativeBuffer` - Speculative execution with conflict probability tracking
 
 mod types;
 mod epoch;
@@ -16,6 +17,7 @@ mod conflict;
 mod manager;
 mod recovery;
 mod coordination_free;
+mod speculative;
 
 pub use types::{
     TxId, EpochId, TransactionStatus, WriteGranularity,
@@ -33,4 +35,8 @@ pub use manager::TransactionManager;
 pub use recovery::{RecoveryReport, RecoveryManager};
 pub use coordination_free::{
     CoordinationFreeConfig, CoordinationFreeError, CoordinationFreeManager,
+};
+pub use speculative::{
+    SpeculativeStatus, TentativeCommit, ConflictProbabilityTracker,
+    SpeculativeConfig, SpeculativeBuffer, SpeculativeCommitResult, SpeculativeMetrics,
 };

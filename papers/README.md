@@ -9,9 +9,9 @@ Technical papers documenting Rhizo's theoretical foundations and implementation.
 | [cross_table_acid_paper.md](cross_table_acid_paper.md) | Cross-table ACID transactions via content-addressable storage | Core implementation |
 | [acid_without_consensus_paper.md](acid_without_consensus_paper.md) | Algebraic transactions for coordination-free distributed commits | Implemented |
 | [waiting_waste_theorem_paper.md](waiting_waste_theorem_paper.md) | Why consensus energy diverges with network latency | Academic submission |
-| [speculative_safety_proof.md](speculative_safety_proof.md) | Formal proof of serializability preservation under speculation | Theoretical |
+| [speculative_safety_proof.md](speculative_safety_proof.md) | Formal proof of serializability preservation under speculation | Implemented |
 | [time_energy_theory_paper.md](time_energy_theory_paper.md) | Time and energy costs of coordination in distributed systems | Research |
-| [poac_paper.md](poac_paper.md) | Probabilistic Optimistic Algebraic Consistency | Research/Future |
+| [poac_paper.md](poac_paper.md) | Probabilistic Optimistic Algebraic Consistency | Partially implemented |
 
 ## Summary
 
@@ -41,7 +41,7 @@ Focused paper proving why consensus energy diverges with network latency. Key co
 - Quantitative analysis showing 98%+ energy wasted at WAN latencies
 - Empirical validation with 97,943x energy improvement measured
 
-### Speculative Safety Proof (Theoretical)
+### Speculative Safety Proof (Implemented)
 
 Formal proof that speculative execution preserves serializability. Key contributions:
 - **Detection Completeness Theorem**: Bloom filters guarantee zero false negatives
@@ -49,12 +49,14 @@ Formal proof that speculative execution preserves serializability. Key contribut
 - **Speculative Safety Theorem**: Three conditions for provably correct speculation
 - Formal state machine and invariants for implementation
 
-### POAC (Research)
+**Implementation:** `SpeculativeBuffer` with visibility invariant, `ConflictProbabilityTracker` with EMA learning, and `commit_with_speculation()` in `CoordinationFreeManager`. 11 tests validate the formal guarantees.
 
-Explores probabilistic techniques for further performance optimization. Experimental techniques:
-- Bloom filter write-sets for O(1) conflict detection
-- Speculative execution for low-conflict workloads (see Speculative Safety Proof)
-- Escrow transactions for hot spot scalability
+### POAC (Research/Partially Implemented)
+
+Explores probabilistic techniques for further performance optimization:
+- **Bloom filter write-sets** [Implemented] — O(1) conflict detection with POAC Table 1 validation
+- **Speculative execution** [Implemented] — Adaptive threshold with EMA probability learning
+- **Escrow transactions** [Future] — Hot spot scalability via pre-allocated quotas
 
 ## Citation
 
