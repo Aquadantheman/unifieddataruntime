@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-02-22T16:56:22",
+  "config": {
+    "iterations": 20,
+    "rows": 10000
+  },
+  "results": [
+    {
+      "system": "Rhizo write (10000 rows, no fsync)",
+      "operation": "write table",
+      "durability": "process-crash",
+      "iterations": 20,
+      "mean_ms": 65.164,
+      "median_ms": 65.209,
+      "stddev_ms": 5.0399,
+      "p99_ms": 75.2023
+    },
+    {
+      "system": "Rhizo write (10000 rows, dir fsync)",
+      "operation": "write table + dir fsync",
+      "durability": "power-loss",
+      "iterations": 20,
+      "mean_ms": 62.7819,
+      "median_ms": 61.1272,
+      "stddev_ms": 3.4919,
+      "p99_ms": 71.3001
+    },
+    {
+      "system": "SQLite WAL NORMAL (10000 rows)",
+      "operation": "INSERT rows",
+      "durability": "process-crash",
+      "iterations": 20,
+      "mean_ms": 15.5967,
+      "median_ms": 15.3049,
+      "stddev_ms": 2.3942,
+      "p99_ms": 24.8947
+    },
+    {
+      "system": "SQLite WAL FULL (10000 rows)",
+      "operation": "INSERT rows + fsync",
+      "durability": "power-loss",
+      "iterations": 20,
+      "mean_ms": 15.8916,
+      "median_ms": 15.4984,
+      "stddev_ms": 1.9849,
+      "p99_ms": 23.4956
+    }
+  ],
+  "summary": {
+    "rhizo_no_fsync_ms": 65.164,
+    "rhizo_with_fsync_ms": 62.7819,
+    "sqlite_normal_ms": 15.5967,
+    "sqlite_full_ms": 15.8916,
+    "speedup_no_fsync": 0.2,
+    "speedup_with_fsync": 0.3,
+    "fsync_overhead_factor": 1.0
+  },
+  "durability_note": "Process-crash durable: survives kill -9, OOM, application crashes. Power-loss durable: survives sudden power failure, requires fsync."
+}

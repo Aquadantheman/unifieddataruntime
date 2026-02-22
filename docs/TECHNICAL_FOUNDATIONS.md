@@ -215,13 +215,42 @@ with db.transaction() as tx:
 | Order placement | Coordinated | Business logic requires atomicity |
 | Inventory with constraints | Coordinated | Constraint checks need coordination |
 
-### Durability Note
+### Durability Guarantees
 
-The 0.001ms coordination-free commit does not include fsync. Data is durable to process crash (atomic file rename) but not to power loss.
+Rhizo has **two commit paths** with different durability characteristics:
 
-For power-loss durability:
-- **Single node:** Enable fsync (adds ~0.3ms latency)
-- **Distributed:** Replication provides durability (N copies across nodes)
+#### 1. Algebraic Commit (0.001ms)
+- **What:** In-memory CRDT merge, no disk write
+- **Durability:** None locally - durability via **replication**
+- **Recovery:** Gossip protocol syncs state from other nodes
+- **Use case:** Counters, metrics, event streams
+
+This is the "59x faster than 2PC" path. Durability comes from having N copies across nodes, not from local disk persistence.
+
+#### 2. Disk Write (~18-65ms per batch)
+- **What:** Parquet encoding to content-addressed chunks
+- **Durability:** Process-crash durable (atomic rename), power-loss requires fsync
+- **Recovery:** All chunks survive process crash; fsync needed for power loss
+- **Use case:** Batch OLAP, materializing query results, backups
+
+**Benchmark results** (100 rows per write):
+| System | Latency | Durability |
+|--------|---------|------------|
+| Rhizo (no fsync) | ~18ms | Process-crash |
+| Rhizo (with fsync) | ~18ms | Power-loss |
+| SQLite WAL NORMAL | ~0.2ms | Process-crash |
+| SQLite WAL FULL | ~0.5ms | Power-loss |
+
+**Why is Rhizo disk write slower than SQLite?**
+
+Rhizo is OLAP-first. The write path prioritizes read performance over write latency:
+- Parquet columnar encoding (compression, predicate pushdown)
+- Content-addressed deduplication (Merkle tree storage)
+- Arrow chunk cache compatibility
+
+For OLTP-style single-row commits, use the algebraic path (10,000x faster).
+
+For power-loss durability in single-node deployments, fsync can be enabled (future configuration option). In distributed deployments, replication provides durability without fsync.
 
 ### Recovery Correctness
 
