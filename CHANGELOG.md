@@ -5,9 +5,62 @@ All notable changes to Rhizo will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - 2026-01-31
+## [0.6.0] - 2026-02-22
 
 ### Added
+
+#### Speculative Execution & POAC Framework
+- **Speculative execution** (`rhizo_core::transaction::speculative`): Full implementation from formal proof
+  - `SpeculativeBuffer`: Visibility invariant isolation (speculative writes hidden from reads)
+  - `ConflictProbabilityTracker`: Per-key EMA learning (configurable α, default 0.1)
+  - `SpeculativeConfig`: Conservative/balanced/aggressive presets with threshold tuning
+  - `TentativeCommit`: Tracking structure with affected keys, probability, and status
+- **Extended `CoordinationFreeManager`**:
+  - `commit_with_speculation()`: Decides speculate vs eager based on learned probability
+  - `confirm_speculative()`: Promotes tentative commit to confirmed state
+  - `rollback_speculative()`: Aborts and updates probability tracker (learns from conflicts)
+  - `check_pending_conflicts()`: Batch conflict detection for pending commits
+- **Bloom filter conflict detection** (`BloomFilter`, `BloomWriteSet`, `BloomFilterConflictDetector`):
+  - O(1) memory conflict detection with zero false negatives
+  - BLAKE3 hash derivation with optimal POAC parameters
+  - POAC Table 1 validation: <2% FP rate at 1K/10K/100K/1M elements
+  - >90% memory savings vs explicit write sets
+
+#### Research Papers
+- **`papers/waiting_waste_theorem_paper.md`**: Academic submission proving consensus energy diverges with latency
+  - Waiting Waste Theorem: lim(L→∞) E_wait / E_total = 1
+  - Coordination-Free Corollary: lim(L→∞) E_cf / E_consensus = 0
+  - Real measurements: 59x vs localhost 2PC, 355x vs SQLite FULL sync
+- **`papers/speculative_safety_proof.md`**: Formal proof of serializability preservation
+  - Detection Completeness Theorem (Bloom filters guarantee zero false negatives)
+  - Rollback Atomicity Theorem (visibility invariant makes atomicity unnecessary)
+  - Speculative Safety Theorem (three conditions for provably correct speculation)
+  - Formal state machine and invariants
+
+#### Adversarial Testing
+- **Jepsen-style adversarial testing** in `rhizo_core::distributed::simulation`:
+  - `AdversarialConfig`: Configurable drop/delay/duplicate probabilities
+  - Three presets: mild (5% drops), moderate (15% drops), severe (30% drops)
+  - 8 adversarial tests verifying convergence under network faults
+  - Reproducible with seed parameter for debugging
+
+#### Documentation
+- **`docs/TECHNICAL_FOUNDATIONS.md`** expanded:
+  - Real-world workload analysis (92% TPC-C algebraic)
+  - Consistency model guarantees for coordinated vs coordination-free modes
+  - Durability guarantees with benchmarks
+  - Gossip protocol crossover analysis (LBP formula, N < 100 threshold)
+- **`internal/TECHNICAL_REVIEW.md`**: Gap analysis with 13 of 16 items resolved
+
+### Testing
+- 11 new speculative execution tests
+- 8 new adversarial convergence tests
+- 3 new GC branch safety tests (shared chunks survive partial GC)
+- **1,420+ total tests** (467 Rust + 953 Python)
+
+---
+
+### Also in 0.6.0
 
 #### Schema Evolution & Primary Keys
 - **Schema evolution enforcement**: Additive-only by default — new columns OK, removals/type changes blocked

@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "rhizo-core>=0.5.3",
+    "rhizo-core>=0.6.0",
     "pyarrow>=14.0.0",
     "duckdb>=0.9.0",
     "pandas>=2.0.0",
