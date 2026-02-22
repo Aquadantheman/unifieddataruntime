@@ -22,3 +22,4 @@ parquet = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+rand = "0.8"

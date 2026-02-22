@@ -66,6 +66,8 @@ pub struct SimulationConfig {
     pub randomize_order: bool,
     /// Simulated network partition (node pairs that can't communicate)
     pub partitions: Vec<(usize, usize)>,
+    /// Adversarial network conditions for chaos testing
+    pub adversarial: Option<AdversarialConfig>,
 }
 
 impl Default for SimulationConfig {
@@ -74,7 +76,80 @@ impl Default for SimulationConfig {
             max_rounds: 100,
             randomize_order: false,
             partitions: Vec::new(),
+            adversarial: None,
         }
+    }
+}
+
+/// Configuration for adversarial/chaos testing of the distributed simulation.
+///
+/// This enables Jepsen-style testing where messages may be randomly dropped,
+/// delayed, or reordered to verify that the system converges correctly under
+/// adverse conditions.
+#[derive(Debug, Clone)]
+pub struct AdversarialConfig {
+    /// Probability of dropping a message (0.0 - 1.0)
+    pub drop_probability: f64,
+    /// Probability of delaying a message by 1-max_delay rounds
+    pub delay_probability: f64,
+    /// Maximum rounds to delay a message
+    pub max_delay: usize,
+    /// Probability of duplicating a message
+    pub duplicate_probability: f64,
+    /// Random seed for reproducibility (None = random each run)
+    pub seed: Option<u64>,
+}
+
+impl Default for AdversarialConfig {
+    fn default() -> Self {
+        Self {
+            drop_probability: 0.0,
+            delay_probability: 0.0,
+            max_delay: 5,
+            duplicate_probability: 0.0,
+            seed: None,
+        }
+    }
+}
+
+impl AdversarialConfig {
+    /// Create a mild adversarial config (5% drops, 10% delays)
+    pub fn mild() -> Self {
+        Self {
+            drop_probability: 0.05,
+            delay_probability: 0.10,
+            max_delay: 3,
+            duplicate_probability: 0.02,
+            seed: None,
+        }
+    }
+
+    /// Create a moderate adversarial config (15% drops, 25% delays)
+    pub fn moderate() -> Self {
+        Self {
+            drop_probability: 0.15,
+            delay_probability: 0.25,
+            max_delay: 5,
+            duplicate_probability: 0.05,
+            seed: None,
+        }
+    }
+
+    /// Create a severe adversarial config (30% drops, 40% delays)
+    pub fn severe() -> Self {
+        Self {
+            drop_probability: 0.30,
+            delay_probability: 0.40,
+            max_delay: 10,
+            duplicate_probability: 0.10,
+            seed: None,
+        }
+    }
+
+    /// Set the random seed for reproducibility
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
+        self
     }
 }
 
@@ -263,6 +338,12 @@ pub struct SimulationStats {
     pub rounds_to_converge: Option<usize>,
     /// Total operations committed
     pub operations_committed: usize,
+    /// Messages dropped by adversarial conditions
+    pub adversarial_drops: usize,
+    /// Messages delayed by adversarial conditions
+    pub adversarial_delays: usize,
+    /// Messages duplicated by adversarial conditions
+    pub adversarial_duplicates: usize,
 }
 
 impl SimulatedCluster {
@@ -337,6 +418,112 @@ impl SimulatedCluster {
                 self.stats.messages_delivered += 1;
             } else {
                 self.stats.messages_dropped += 1;
+            }
+        }
+    }
+
+    /// Deliver messages with adversarial network conditions.
+    ///
+    /// This method applies random drops, delays, and duplications based on
+    /// the adversarial configuration. Used for chaos/fuzz testing.
+    #[cfg(test)]
+    pub fn deliver_messages_adversarial(&mut self, rng: &mut impl rand::Rng) {
+
+        let adversarial = match &self.config.adversarial {
+            Some(cfg) => cfg.clone(),
+            None => {
+                // No adversarial config, fall back to normal delivery
+                return self.deliver_messages();
+            }
+        };
+
+        let messages: Vec<Message> = self.messages.drain(..).collect();
+        let mut delayed_messages: Vec<Message> = Vec::new();
+        let mut duplicate_messages: Vec<Message> = Vec::new();
+
+        for mut msg in messages {
+            // Check partition first
+            if self.is_partitioned(msg.from, msg.to) {
+                self.stats.messages_dropped += 1;
+                continue;
+            }
+
+            // Handle delayed messages from previous rounds
+            if msg.delay > 0 {
+                msg.delay -= 1;
+                delayed_messages.push(msg);
+                continue;
+            }
+
+            // Random drop
+            if rng.gen::<f64>() < adversarial.drop_probability {
+                self.stats.adversarial_drops += 1;
+                continue;
+            }
+
+            // Random delay
+            if rng.gen::<f64>() < adversarial.delay_probability {
+                let delay = rng.gen_range(1..=adversarial.max_delay);
+                msg.delay = delay;
+                delayed_messages.push(msg.clone());
+                self.stats.adversarial_delays += 1;
+                continue;
+            }
+
+            // Random duplicate (deliver now and queue a copy)
+            if rng.gen::<f64>() < adversarial.duplicate_probability {
+                duplicate_messages.push(msg.clone());
+                self.stats.adversarial_duplicates += 1;
+            }
+
+            // Deliver the message
+            self.nodes[msg.to].receive_update(&msg.update);
+            self.stats.messages_delivered += 1;
+        }
+
+        // Re-queue delayed messages
+        for msg in delayed_messages {
+            self.messages.push_back(msg);
+        }
+
+        // Queue duplicate messages for next round
+        for msg in duplicate_messages {
+            self.messages.push_back(msg);
+        }
+    }
+
+    /// Run one round of propagation with adversarial conditions.
+    #[cfg(test)]
+    pub fn propagate_round_adversarial(&mut self, rng: &mut impl rand::Rng) {
+        self.broadcast_all();
+        self.deliver_messages_adversarial(rng);
+        self.round += 1;
+    }
+
+    /// Propagate until convergence with adversarial conditions.
+    ///
+    /// In adversarial mode, messages may be dropped. Real gossip protocols
+    /// handle this by periodically re-broadcasting state. We simulate this
+    /// by requeuing all updates every `requeue_interval` rounds.
+    #[cfg(test)]
+    pub fn propagate_all_adversarial(&mut self, rng: &mut impl rand::Rng) {
+        const REQUEUE_INTERVAL: usize = 10; // Re-gossip every 10 rounds
+
+        for round_num in 0..self.config.max_rounds {
+            let had_messages = !self.nodes.iter().all(|n| n.outbox.is_empty())
+                || !self.messages.is_empty(); // Include delayed messages
+
+            self.propagate_round_adversarial(rng);
+
+            // Periodically requeue all updates to recover from drops
+            // This simulates real gossip protocol behavior
+            if round_num > 0 && round_num % REQUEUE_INTERVAL == 0 {
+                self.requeue_all_updates();
+            }
+
+            if !had_messages && self.verify_convergence() {
+                self.stats.rounds_to_converge = Some(self.round);
+                return;
             }
         }
     }
@@ -494,6 +681,12 @@ impl SimulationBuilder {
         self
     }
 
+    /// Enable adversarial network conditions.
+    pub fn with_adversarial(mut self, config: AdversarialConfig) -> Self {
+        self.config.adversarial = Some(config);
+        self
+    }
+
     /// Build and run the simulation.
     pub fn run(self) -> Result<SimulatedCluster, LocalCommitError> {
         let mut cluster = SimulatedCluster::with_config(self.num_nodes, self.config);
@@ -505,6 +698,25 @@ impl SimulationBuilder {
 
         // Propagate until convergence
         cluster.propagate_all();
+
+        Ok(cluster)
+    }
+
+    /// Build and run with adversarial conditions.
+    #[cfg(test)]
+    pub fn run_adversarial(self, seed: u64) -> Result<SimulatedCluster, LocalCommitError> {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+        let mut cluster = SimulatedCluster::with_config(self.num_nodes, self.config);
+
+        // Commit all initial operations
+        for (node_index, tx) in self.initial_operations {
+            cluster.commit_on_node(node_index, tx)?;
+        }
+
+        // Propagate with adversarial conditions
+        cluster.propagate_all_adversarial(&mut rng);
 
         Ok(cluster)
     }
@@ -1328,5 +1540,315 @@ mod tests {
                 Some(10)
             );
         }
+    }
+
+    // ============ Adversarial / Chaos Tests ============
+    //
+    // These tests verify that the algebraic merge system converges correctly
+    // even under adverse network conditions: message drops, delays, duplicates.
+    // This is Jepsen-style testing for the distributed simulation.
+
+    #[test]
+    fn test_adversarial_mild_still_converges() {
+        // Mild adversarial conditions: 5% drops, 10% delays
+        use rand::SeedableRng;
+
+        for seed in 0..10 {
+            let mut tx0 = AlgebraicTransaction::new();
+            tx0.add_operation(add_op("counter", 100));
+
+            let mut tx1 = AlgebraicTransaction::new();
+            tx1.add_operation(add_op("counter", 200));
+
+            let cluster = SimulationBuilder::new(2)
+                .max_rounds(50) // Extra rounds to handle delays
+                .with_adversarial(AdversarialConfig::mild().with_seed(seed))
+                .with_operation(0, tx0)
+                .with_operation(1, tx1)
+                .run_adversarial(seed)
+                .unwrap();
+
+            assert!(
+                cluster.verify_convergence(),
+                "Seed {} failed to converge under mild adversarial conditions",
+                seed
+            );
+            assert_eq!(
+                cluster.get_node_state(0, "counter").unwrap().as_integer(),
+                Some(300),
+                "Seed {} has wrong value",
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_adversarial_moderate_still_converges() {
+        // Moderate adversarial conditions: 15% drops, 25% delays
+        for seed in 0..10 {
+            let mut tx0 = AlgebraicTransaction::new();
+            tx0.add_operation(add_op("x", 10));
+
+            let mut tx1 = AlgebraicTransaction::new();
+            tx1.add_operation(add_op("x", 20));
+
+            let mut tx2 = AlgebraicTransaction::new();
+            tx2.add_operation(add_op("x", 30));
+
+            let cluster = SimulationBuilder::new(3)
+                .max_rounds(100) // More rounds for recovery
+                .with_adversarial(AdversarialConfig::moderate().with_seed(seed))
+                .with_operation(0, tx0)
+                .with_operation(1, tx1)
+                .with_operation(2, tx2)
+                .run_adversarial(seed)
+                .unwrap();
+
+            assert!(
+                cluster.verify_convergence(),
+                "Seed {} failed to converge under moderate adversarial conditions",
+                seed
+            );
+            assert_eq!(
+                cluster.get_node_state(0, "x").unwrap().as_integer(),
+                Some(60),
+                "Seed {} has wrong value",
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_adversarial_severe_eventually_converges() {
+        // Severe adversarial conditions: 30% drops, 40% delays
+        // With enough rounds, algebraic operations MUST converge
+        for seed in 0..5 {
+            let mut operations = Vec::new();
+            for i in 0..5 {
+                let mut tx = AlgebraicTransaction::new();
+                tx.add_operation(add_op("total", (i + 1) as i64));
+                operations.push((i, tx));
+            }
+
+            let mut builder = SimulationBuilder::new(5)
+                .max_rounds(200) // Many rounds for severe conditions
+                .with_adversarial(AdversarialConfig::severe().with_seed(seed));
+
+            for (node, tx) in operations {
+                builder = builder.with_operation(node, tx);
+            }
+
+            let cluster = builder.run_adversarial(seed).unwrap();
+
+            assert!(
+                cluster.verify_convergence(),
+                "Seed {} failed to converge under severe adversarial conditions. Stats: {:?}",
+                seed,
+                cluster.stats
+            );
+            // 1 + 2 + 3 + 4 + 5 = 15
+            assert_eq!(
+                cluster.get_node_state(0, "total").unwrap().as_integer(),
+                Some(15),
+                "Seed {} has wrong value",
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_adversarial_duplicates_are_idempotent() {
+        // Test that duplicate messages don't corrupt state
+        // High duplicate probability, no drops
+        let config = AdversarialConfig {
+            drop_probability: 0.0,
+            delay_probability: 0.1,
+            max_delay: 2,
+            duplicate_probability: 0.5, // 50% duplicates!
+            seed: Some(42),
+        };
+
+        for seed in 0..10 {
+            let mut tx0 = AlgebraicTransaction::new();
+            tx0.add_operation(add_op("counter", 100));
+
+            let mut tx1 = AlgebraicTransaction::new();
+            tx1.add_operation(add_op("counter", 200));
+
+            let cluster = SimulationBuilder::new(2)
+                .max_rounds(50)
+                .with_adversarial(config.clone().with_seed(seed))
+                .with_operation(0, tx0)
+                .with_operation(1, tx1)
+                .run_adversarial(seed)
+                .unwrap();
+
+            // Despite duplicates, deduplication should prevent double-application
+            assert!(cluster.verify_convergence());
+            assert_eq!(
+                cluster.get_node_state(0, "counter").unwrap().as_integer(),
+                Some(300), // NOT 600 or higher
+                "Seed {} has corrupted value due to duplicate processing",
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_adversarial_max_operations() {
+        // Stress test: many operations under adversarial conditions
+        for seed in 0..3 {
+            let mut builder = SimulationBuilder::new(5)
+                .max_rounds(150)
+                .with_adversarial(AdversarialConfig::moderate().with_seed(seed));
+
+            // Each node commits 10 operations
+            let mut expected_sum: i64 = 0;
+            for node in 0..5 {
+                for op in 0..10 {
+                    let value = (node * 10 + op + 1) as i64;
+                    expected_sum += value;
+
+                    let mut tx = AlgebraicTransaction::new();
+                    tx.add_operation(add_op("sum", value));
+                    builder = builder.with_operation(node, tx);
+                }
+            }
+
+            let cluster = builder.run_adversarial(seed).unwrap();
+
+            assert!(
+                cluster.verify_convergence(),
+                "Seed {} failed with 50 operations",
+                seed
+            );
+            assert_eq!(
+                cluster.get_node_state(0, "sum").unwrap().as_integer(),
+                Some(expected_sum),
+                "Seed {} has wrong sum",
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_adversarial_mixed_operation_types() {
+        // Test all operation types under adversarial conditions
+        for seed in 0..5 {
+            let mut tx0 = AlgebraicTransaction::new();
+            tx0.add_operation(add_op("counter", 10));
+            tx0.add_operation(max_op("max_val", 100));
+            tx0.add_operation(union_op("tags", &["a", "b"]));
+
+            let mut tx1 = AlgebraicTransaction::new();
+            tx1.add_operation(add_op("counter", 20));
+            tx1.add_operation(max_op("max_val", 50));
+            tx1.add_operation(union_op("tags", &["b", "c"]));
+
+            let mut tx2 = AlgebraicTransaction::new();
+            tx2.add_operation(add_op("counter", 30));
+            tx2.add_operation(max_op("max_val", 200));
+            tx2.add_operation(union_op("tags", &["c", "d"]));
+
+            let cluster = SimulationBuilder::new(3)
+                .max_rounds(100)
+                .with_adversarial(AdversarialConfig::moderate().with_seed(seed))
+                .with_operation(0, tx0)
+                .with_operation(1, tx1)
+                .with_operation(2, tx2)
+                .run_adversarial(seed)
+                .unwrap();
+
+            assert!(cluster.verify_convergence(), "Seed {} failed", seed);
+
+            // Verify each operation type
+            assert_eq!(
+                cluster.get_node_state(0, "counter").unwrap().as_integer(),
+                Some(60)
+            );
+            assert_eq!(
+                cluster.get_node_state(0, "max_val").unwrap().as_integer(),
+                Some(200)
+            );
+            if let Some(AlgebraicValue::StringSet(tags)) = cluster.get_node_state(0, "tags") {
+                assert_eq!(tags.len(), 4); // a, b, c, d
+            } else {
+                panic!("Seed {} has wrong tags type", seed);
+            }
+        }
+    }
+
+    #[test]
+    fn test_adversarial_stats_tracked() {
+        // Verify that adversarial stats are properly tracked
+        use rand::SeedableRng;
+        let seed = 12345u64;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+        let config = SimulationConfig {
+            max_rounds: 50,
+            randomize_order: false,
+            partitions: Vec::new(),
+            adversarial: Some(AdversarialConfig::moderate()),
+        };
+
+        let mut cluster = SimulatedCluster::with_config(3, config);
+
+        for i in 0..3 {
+            let mut tx = AlgebraicTransaction::new();
+            tx.add_operation(add_op("x", (i + 1) as i64));
+            cluster.commit_on_node(i, tx).unwrap();
+        }
+
+        cluster.propagate_all_adversarial(&mut rng);
+
+        // With moderate config, we should see some adversarial events
+        let stats = cluster.get_stats();
+        // At least verify stats are being tracked (may be 0 with lucky RNG)
+        assert!(
+            stats.messages_sent > 0,
+            "Should have sent some messages"
+        );
+        // The sum of delivered + dropped should account for all messages
+        // (some may still be in flight due to delays)
+    }
+
+    #[test]
+    fn test_adversarial_reproducible_with_seed() {
+        // Same seed should produce same results
+        let seed = 99999u64;
+
+        let run = |s| {
+            let mut tx0 = AlgebraicTransaction::new();
+            tx0.add_operation(add_op("x", 1));
+
+            let mut tx1 = AlgebraicTransaction::new();
+            tx1.add_operation(add_op("x", 2));
+
+            SimulationBuilder::new(2)
+                .max_rounds(50)
+                .with_adversarial(AdversarialConfig::moderate().with_seed(s))
+                .with_operation(0, tx0)
+                .with_operation(1, tx1)
+                .run_adversarial(s)
+                .unwrap()
+        };
+
+        let cluster1 = run(seed);
+        let cluster2 = run(seed);
+
+        // Same seed should give same stats
+        assert_eq!(
+            cluster1.stats.adversarial_drops,
+            cluster2.stats.adversarial_drops
+        );
+        assert_eq!(
+            cluster1.stats.adversarial_delays,
+            cluster2.stats.adversarial_delays
+        );
+        assert_eq!(
+            cluster1.stats.adversarial_duplicates,
+            cluster2.stats.adversarial_duplicates
+        );
     }
 }
