@@ -147,7 +147,7 @@ impl BloomFilter {
         let k = k.clamp(1, 16); // Clamp to reasonable range
 
         // Allocate bit array (packed into u64s)
-        let num_words = (m + 63) / 64;
+        let num_words = m.div_ceil(64);
 
         Self {
             bits: vec![0u64; num_words],
@@ -162,7 +162,7 @@ impl BloomFilter {
         assert!(num_bits > 0, "num_bits must be > 0");
         assert!(num_hashes > 0, "num_hashes must be > 0");
 
-        let num_words = (num_bits + 63) / 64;
+        let num_words = num_bits.div_ceil(64);
         Self {
             bits: vec![0u64; num_words],
             num_bits,
