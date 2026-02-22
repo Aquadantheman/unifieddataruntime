@@ -8,6 +8,9 @@ Technical papers documenting Rhizo's theoretical foundations and implementation.
 |-------|-------------|--------|
 | [cross_table_acid_paper.md](cross_table_acid_paper.md) | Cross-table ACID transactions via content-addressable storage | Core implementation |
 | [acid_without_consensus_paper.md](acid_without_consensus_paper.md) | Algebraic transactions for coordination-free distributed commits | Implemented |
+| [waiting_waste_theorem_paper.md](waiting_waste_theorem_paper.md) | Why consensus energy diverges with network latency | Academic submission |
+| [speculative_safety_proof.md](speculative_safety_proof.md) | Formal proof of serializability preservation under speculation | Theoretical |
+| [time_energy_theory_paper.md](time_energy_theory_paper.md) | Time and energy costs of coordination in distributed systems | Research |
 | [poac_paper.md](poac_paper.md) | Probabilistic Optimistic Algebraic Consistency | Research/Future |
 
 ## Summary
@@ -30,11 +33,27 @@ Describes how algebraic operation classification enables coordination-free distr
 - **59x** measured vs localhost 2PC; **355x** vs SQLite FULL sync
 - 97,943x energy reduction vs consensus energy model (estimated)
 
+### Waiting Waste Theorem (Academic Submission)
+
+Focused paper proving why consensus energy diverges with network latency. Key contributions:
+- **Waiting Waste Theorem**: $\lim_{L \to \infty} E_{wait} / E_{total} = 1$
+- **Coordination-Free Corollary**: $\lim_{L \to \infty} E_{cf} / E_{consensus} = 0$
+- Quantitative analysis showing 98%+ energy wasted at WAN latencies
+- Empirical validation with 97,943x energy improvement measured
+
+### Speculative Safety Proof (Theoretical)
+
+Formal proof that speculative execution preserves serializability. Key contributions:
+- **Detection Completeness Theorem**: Bloom filters guarantee zero false negatives
+- **Rollback Atomicity Theorem**: Visibility invariant makes atomicity unnecessary
+- **Speculative Safety Theorem**: Three conditions for provably correct speculation
+- Formal state machine and invariants for implementation
+
 ### POAC (Research)
 
 Explores probabilistic techniques for further performance optimization. Experimental techniques:
 - Bloom filter write-sets for O(1) conflict detection
-- Speculative execution for low-conflict workloads
+- Speculative execution for low-conflict workloads (see Speculative Safety Proof)
 - Escrow transactions for hot spot scalability
 
 ## Citation
