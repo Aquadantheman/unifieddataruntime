@@ -4,7 +4,7 @@
 
 ## Abstract
 
-Distributed consensus protocols consume energy not only for computation and communication, but also while waiting for network responses. We formalize this observation as the **Waiting Waste Theorem**: for any consensus protocol requiring synchronous round-trips, the fraction of energy spent waiting approaches 100% as network latency increases. Formally, $\lim_{L \to \infty} E_{wait} / E_{total} = 1$. This result has immediate practical implications: at typical WAN latencies (50ms RTT), over 98% of transaction energy is wasted waiting; at geo-distributed latencies (150ms RTT), this exceeds 99%. We prove a corollary showing that coordination-free systems achieve unbounded energy improvement: $\lim_{L \to \infty} E_{cf} / E_{consensus} = 0$. We validate these predictions through latency measurements against real systems: coordination-free commits are 59x faster than localhost two-phase commit, 355x faster than SQLite with fsync, and projected 160,000x faster than geo-distributed consensus based on measured network RTT. These results provide a mathematical foundation for understanding why coordination-free distributed systems are not merely faster, but fundamentally more energy-efficient.
+Distributed consensus protocols consume energy not only for computation and communication, but also while waiting for network responses. We formalize this observation as the **Waiting Waste Theorem**: for any consensus protocol requiring synchronous round-trips, the fraction of energy spent waiting approaches 100% as network latency increases. Formally, $\lim_{L \to \infty} E_{wait} / E_{total} = 1$. This result has immediate practical implications: at typical WAN latencies (50ms RTT), over 98% of transaction energy is wasted waiting; at geo-distributed latencies (150ms RTT), this exceeds 99%. We prove a corollary showing that coordination-free systems achieve unbounded energy improvement: $\lim_{L \to \infty} E_{cf} / E_{consensus} = 0$. We validate these predictions through measurements against real systems: coordination-free commits are 30x faster than localhost two-phase commit, 178x faster than SQLite with fsync, and 370x more energy-efficient than local Raft consensus. These results provide a mathematical foundation for understanding why coordination-free distributed systems are not merely faster, but fundamentally more energy-efficient.
 
 **Keywords**: distributed systems, consensus protocols, energy efficiency, coordination-free, sustainability
 
@@ -46,7 +46,7 @@ This paper makes the following contributions:
 
 4. **Quantitative Analysis**: We derive closed-form expressions for waiting waste at any latency, enabling precise energy predictions.
 
-5. **Empirical Validation**: We validate latency predictions against real systems (59x vs localhost 2PC, 355x vs SQLite fsync) and demonstrate model consistency through controlled experiments.
+5. **Empirical Validation**: We validate predictions against real systems (30x vs localhost 2PC, 178x vs SQLite fsync, 370x energy improvement vs Raft) and demonstrate model consistency through controlled experiments.
 
 ---
 
@@ -138,7 +138,9 @@ where:
 - $E_{communicate} = P_{active} \times T_{communicate}$
 - $E_{wait} = P_{idle} \times T_{wait}$
 
-This decomposition assumes the system operates at active power during computation and communication, and idle power during waiting. While simplified (actual systems have multiple power states), this model captures the essential dynamics.
+This decomposition assumes binary power states: active power during computation and communication, idle power during waiting. Real processors have intermediate C-states (C1, C3, C6) with progressively lower power draw, and use DVFS (dynamic voltage and frequency scaling) to adjust power dynamically. This makes our model a **conservative upper bound** on waiting waste—actual waiting energy may be lower than $P_{idle} \times T_{wait}$ if the CPU enters deep sleep states.
+
+However, C-state transitions require microseconds to milliseconds of latency, and consensus waits of 5-150ms are long enough for C-state entry. More importantly, the qualitative result—waiting energy dominates at WAN latencies—holds regardless of the specific idle power value, since any $P_{idle} > 0$ produces the same limit behavior: $\lim_{L \to \infty} E_{wait}/E_{total} = 1$.
 
 ### 3.2 Time Bounds
 
@@ -192,7 +194,7 @@ $$\lim_{L \to \infty} \frac{E_{wait}}{E_{total}} = \frac{1}{0 + 1} = 1$$
 
 **Corollary 1 (Convergence Rate)**: The waiting fraction exceeds threshold $\tau$ when:
 
-$$L > \frac{C(1-\tau)}{2RP_{idle}\tau}$$
+$$L > \frac{\tau C}{2RP_{idle}(1-\tau)}$$
 
 *Proof*: Solving $\frac{E_{wait}}{E_{total}} > \tau$ for $L$:
 
@@ -353,15 +355,17 @@ Using typical values: $P_{active} = 65W$, $P_{idle} = 22W$, $R = 3$, $T_{compute
 
 ### 6.3 Scale Implications
 
-At scale, the differences become environmentally significant:
+At scale, even modest fractions of coordination-avoidable transactions yield significant savings. Most database transactions are local reads or single-shard writes; only a fraction require cross-region consensus. We estimate conservatively:
 
-| Scenario | Daily Txns | Consensus Annual Energy | CF Annual Energy | Savings |
-|----------|------------|------------------------|------------------|---------|
-| Small service | 1M | 2.4 GWh | 24 MWh | 2.4 GWh |
-| Medium service | 100M | 240 GWh | 2.4 GWh | 238 GWh |
-| Large service | 10B | 24,000 GWh | 240 GWh | 23,760 GWh |
+**Assumptions**: 10B daily transactions at a major cloud service; 10% require cross-region coordination (1B/day); 50ms average consensus latency for those transactions.
 
-For context, 24,000 GWh is approximately the annual electricity consumption of a small country.
+| Component | Calculation | Annual Energy |
+|-----------|-------------|---------------|
+| Cross-region consensus (1B/day) | 1B × 365 × 6.6J | 2,400 GWh |
+| If 50% were coordination-free | 500M × 365 × 6.6J saved | 1,200 GWh savings |
+| If 90% were coordination-free | 900M × 365 × 6.6J saved | 2,160 GWh savings |
+
+For context, 1,200 GWh is roughly the annual output of a 150 MW power plant. The savings scale linearly with the algebraic fraction—the portion of transactions that can be classified as coordination-free.
 
 ---
 
@@ -384,7 +388,7 @@ We measured coordination-free algebraic commits against real coordination system
 
 | System | Operation | Mean Latency | Speedup vs Rhizo |
 |--------|-----------|--------------|------------------|
-| Rhizo (coordination-free) | Algebraic ADD | 0.001 ms | 1x (baseline) |
+| Rhizo (coordination-free) | Algebraic ADD | 0.002 ms | 1x (baseline) |
 | SQLite WAL (NORMAL sync) | UPDATE | 0.022 ms | — |
 | SQLite WAL (FULL sync) | UPDATE + fsync | 0.355 ms | — |
 | Localhost 2PC (3 nodes) | TCP coordination | 0.059 ms | — |
@@ -393,9 +397,9 @@ We measured coordination-free algebraic commits against real coordination system
 
 | Comparison | Speedup | Methodology |
 |------------|---------|-------------|
-| vs SQLite FULL sync | **355x** | Real fsync, real disk I/O |
-| vs Localhost 2PC | **59x** | Real TCP sockets, 3 processes |
-| vs SQLite NORMAL | **22x** | Real WAL mode |
+| vs SQLite FULL sync | **178x** | Real fsync, real disk I/O |
+| vs Localhost 2PC | **30x** | Real TCP sockets, 3 processes |
+| vs SQLite NORMAL | **11x** | Real WAL mode |
 
 ### 7.2 Projected Geo-Distributed Performance
 
@@ -403,10 +407,10 @@ Real geo-distributed measurements require deploying participant servers across r
 
 | Deployment | Network RTT | Projected Commit Latency | Projected Speedup |
 |------------|-------------|--------------------------|-------------------|
-| Same region (NYC → Virginia) | ~10 ms | ~10.1 ms | **10,100x** |
-| Cross-continent (NYC → Oregon) | ~65 ms | ~65.1 ms | **65,100x** |
-| Intercontinental (NYC → Ireland) | ~80 ms | ~80.1 ms | **80,100x** |
-| Global (3 regions) | ~150 ms | ~150.1 ms | **150,000x** |
+| Same region (NYC → Virginia) | ~10 ms | ~10.1 ms | **5,050x** |
+| Cross-continent (NYC → Oregon) | ~65 ms | ~65.1 ms | **32,550x** |
+| Intercontinental (NYC → Ireland) | ~80 ms | ~80.1 ms | **40,050x** |
+| Global (3 regions) | ~150 ms | ~150.1 ms | **75,000x** |
 
 *Note: Projections add measured RTT to measured 2PC overhead. Actual geo-distributed consensus would include additional overhead (leader election, log replication, fsync on multiple nodes), making these projections conservative.*
 
@@ -433,7 +437,7 @@ To validate the Waiting Waste Theorem's energy predictions, we conducted control
 
 ### 7.4 What This Validation Establishes
 
-1. **Latency claims are measured**: The 59x and 355x speedups are real measurements against real systems.
+1. **Latency claims are measured**: The 30x and 178x speedups are real measurements against real systems.
 
 2. **Waiting energy model is validated**: The `time.sleep()` experiments confirm systems consume ~22W idle power during waits, and energy scales linearly with wait duration.
 
