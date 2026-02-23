@@ -505,7 +505,7 @@ These comparisons are structurally favorable to coordination-free systems—by d
 
 Data centers consume approximately 2% of global electricity [14]. As Section 6.3 quantifies, even modest coordination avoidance yields meaningful savings: 600 MWh annually per billion cross-region transactions, representing $60,000 in electricity costs and 270 tonnes of CO₂.
 
-Across the industry—with hundreds of cloud services each processing billions of daily transactions—the aggregate impact compounds. If coordination-free designs captured even 10% of cross-region transaction volume, the cumulative savings would reach tens of GWh annually, equivalent to removing thousands of cars from roads.
+Across the industry—with hundreds of cloud services each processing billions of daily transactions—the aggregate impact compounds. If coordination-free designs captured even 10% of cross-region transaction volume, the cumulative savings would reach GWh-scale annually, equivalent to removing thousands of cars from roads.
 
 ### 8.3 For Future Research
 
