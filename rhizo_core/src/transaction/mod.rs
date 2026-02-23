@@ -8,6 +8,7 @@
 //! - `ConflictDetector` - Pluggable conflict detection strategies
 //! - `CoordinationFreeManager` - Coordination-free mode for algebraic operations
 //! - `SpeculativeBuffer` - Speculative execution with conflict probability tracking
+//! - `EscrowManager` - Escrow transactions for linear horizontal scaling on hot spots
 
 mod types;
 mod epoch;
@@ -18,6 +19,7 @@ mod manager;
 mod recovery;
 mod coordination_free;
 mod speculative;
+mod escrow;
 
 pub use types::{
     TxId, EpochId, TransactionStatus, WriteGranularity,
@@ -39,4 +41,7 @@ pub use coordination_free::{
 pub use speculative::{
     SpeculativeStatus, TentativeCommit, ConflictProbabilityTracker,
     SpeculativeConfig, SpeculativeBuffer, SpeculativeCommitResult, SpeculativeMetrics,
+};
+pub use escrow::{
+    EscrowResult, EscrowError, EscrowConfig, EscrowStats, EscrowManager, EscrowAggregateStats,
 };

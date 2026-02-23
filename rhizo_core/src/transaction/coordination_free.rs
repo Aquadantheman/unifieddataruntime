@@ -48,6 +48,7 @@ use crate::distributed::{
 use super::speculative::{
     SpeculativeBuffer, SpeculativeConfig, SpeculativeCommitResult, SpeculativeMetrics,
 };
+use super::escrow::{EscrowConfig, EscrowManager, EscrowResult, EscrowAggregateStats};
 
 /// Error type for coordination-free operations
 #[derive(Debug, thiserror::Error)]
@@ -126,6 +127,10 @@ pub struct CoordinationFreeManager {
     /// Speculative buffer for tentative commits (POAC speculative execution)
     /// This is isolated from local_state to maintain the visibility invariant
     speculative_buffer: RwLock<SpeculativeBuffer>,
+
+    /// Escrow manager for hot-spot resources (POAC escrow transactions)
+    /// This enables linear horizontal scaling for quota-limited operations
+    escrow: RwLock<Option<EscrowManager>>,
 }
 
 impl CoordinationFreeManager {
@@ -143,6 +148,7 @@ impl CoordinationFreeManager {
             committed_updates: RwLock::new(Vec::new()),
             local_state: RwLock::new(std::collections::HashMap::new()),
             speculative_buffer: RwLock::new(SpeculativeBuffer::new()),
+            escrow: RwLock::new(None),
         }
     }
 
@@ -159,6 +165,43 @@ impl CoordinationFreeManager {
             committed_updates: RwLock::new(Vec::new()),
             local_state: RwLock::new(std::collections::HashMap::new()),
             speculative_buffer: RwLock::new(SpeculativeBuffer::with_config(spec_config)),
+            escrow: RwLock::new(None),
+        }
+    }
+
+    /// Create a new coordination-free manager with escrow support
+    pub fn with_escrow(
+        node_id: NodeId,
+        config: CoordinationFreeConfig,
+        escrow_config: EscrowConfig,
+    ) -> Self {
+        Self {
+            node_id: node_id.clone(),
+            clock: RwLock::new(VectorClock::new()),
+            config,
+            committed_updates: RwLock::new(Vec::new()),
+            local_state: RwLock::new(std::collections::HashMap::new()),
+            speculative_buffer: RwLock::new(SpeculativeBuffer::new()),
+            escrow: RwLock::new(Some(EscrowManager::new(node_id, escrow_config))),
+        }
+    }
+
+    /// Create a fully-configured coordination-free manager
+    pub fn with_full_config(
+        node_id: NodeId,
+        config: CoordinationFreeConfig,
+        spec_config: SpeculativeConfig,
+        escrow_config: Option<EscrowConfig>,
+    ) -> Self {
+        let escrow = escrow_config.map(|c| EscrowManager::new(node_id.clone(), c));
+        Self {
+            node_id,
+            clock: RwLock::new(VectorClock::new()),
+            config,
+            committed_updates: RwLock::new(Vec::new()),
+            local_state: RwLock::new(std::collections::HashMap::new()),
+            speculative_buffer: RwLock::new(SpeculativeBuffer::with_config(spec_config)),
+            escrow: RwLock::new(escrow),
         }
     }
 
@@ -542,6 +585,172 @@ impl CoordinationFreeManager {
             .map_err(|_| CoordinationFreeError::LockError("speculative_buffer".to_string()))?;
         Ok(buffer.pending_count())
     }
+
+    // =========================================================================
+    // Escrow Transactions (POAC Paper Section 5)
+    // =========================================================================
+
+    /// Check if escrow is enabled
+    pub fn has_escrow(&self) -> bool {
+        self.escrow
+            .read()
+            .map(|e| e.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Register a resource for escrow management.
+    ///
+    /// # Arguments
+    ///
+    /// * `resource_id` - Unique identifier for the resource (e.g., "inventory:sku123")
+    /// * `global_total` - Total amount available across all nodes
+    /// * `initial_quota` - Initial quota for this node
+    ///
+    /// # Errors
+    ///
+    /// Returns error if escrow is not enabled or resource already exists.
+    pub fn register_escrow_resource(
+        &self,
+        resource_id: impl Into<String>,
+        global_total: i64,
+        initial_quota: i64,
+    ) -> Result<(), CoordinationFreeError> {
+        let escrow = self
+            .escrow
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("escrow".to_string()))?;
+
+        match escrow.as_ref() {
+            Some(mgr) => mgr
+                .register_resource(resource_id, global_total, initial_quota)
+                .map_err(|e| CoordinationFreeError::SchemaError(e.to_string())),
+            None => Err(CoordinationFreeError::SchemaError(
+                "Escrow not enabled".to_string(),
+            )),
+        }
+    }
+
+    /// Register a resource with automatically calculated optimal quota.
+    ///
+    /// Uses Poisson-based sizing: q* = F^-1_Poisson(1 - ε; λ_node)
+    ///
+    /// # Arguments
+    ///
+    /// * `resource_id` - Unique identifier for the resource
+    /// * `global_total` - Total amount available across all nodes
+    /// * `expected_rate` - Expected request rate (requests per second)
+    ///
+    /// # Returns
+    ///
+    /// The calculated optimal quota.
+    pub fn register_escrow_resource_auto(
+        &self,
+        resource_id: impl Into<String>,
+        global_total: i64,
+        expected_rate: f64,
+    ) -> Result<i64, CoordinationFreeError> {
+        let escrow = self
+            .escrow
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("escrow".to_string()))?;
+
+        match escrow.as_ref() {
+            Some(mgr) => mgr
+                .register_resource_auto_quota(resource_id, global_total, expected_rate)
+                .map_err(|e| CoordinationFreeError::SchemaError(e.to_string())),
+            None => Err(CoordinationFreeError::SchemaError(
+                "Escrow not enabled".to_string(),
+            )),
+        }
+    }
+
+    /// Consume quota for a resource locally (no coordination).
+    ///
+    /// This implements POAC escrow transactions for hot-spot resources.
+    /// Operations consume local quota without coordination. Only quota
+    /// exhaustion triggers coordination.
+    ///
+    /// # Arguments
+    ///
+    /// * `resource_id` - The resource to consume from
+    /// * `amount` - Amount to consume
+    ///
+    /// # Returns
+    ///
+    /// `EscrowResult::Success` if quota was available locally.
+    /// `EscrowResult::QuotaExhausted` if coordination is needed.
+    pub fn consume_escrow(&self, resource_id: &str, amount: i64) -> EscrowResult {
+        let escrow = match self.escrow.read() {
+            Ok(e) => e,
+            Err(_) => return EscrowResult::ResourceNotFound,
+        };
+
+        match escrow.as_ref() {
+            Some(mgr) => mgr.try_consume(resource_id, amount),
+            None => EscrowResult::ResourceNotFound,
+        }
+    }
+
+    /// Replenish escrow quota after coordination.
+    ///
+    /// Call this after coordinating with other nodes to obtain more quota.
+    pub fn replenish_escrow(
+        &self,
+        resource_id: &str,
+        amount: i64,
+    ) -> Result<(), CoordinationFreeError> {
+        let escrow = self
+            .escrow
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("escrow".to_string()))?;
+
+        match escrow.as_ref() {
+            Some(mgr) => mgr
+                .replenish(resource_id, amount)
+                .map_err(|e| CoordinationFreeError::SchemaError(e.to_string())),
+            None => Err(CoordinationFreeError::SchemaError(
+                "Escrow not enabled".to_string(),
+            )),
+        }
+    }
+
+    /// Get escrow statistics for a resource.
+    pub fn escrow_stats(
+        &self,
+        resource_id: &str,
+    ) -> Result<Option<super::escrow::EscrowStats>, CoordinationFreeError> {
+        let escrow = self
+            .escrow
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("escrow".to_string()))?;
+
+        match escrow.as_ref() {
+            Some(mgr) => Ok(mgr.get_stats(resource_id)),
+            None => Ok(None),
+        }
+    }
+
+    /// Get aggregate escrow statistics.
+    pub fn escrow_aggregate_stats(&self) -> Result<Option<EscrowAggregateStats>, CoordinationFreeError> {
+        let escrow = self
+            .escrow
+            .read()
+            .map_err(|_| CoordinationFreeError::LockError("escrow".to_string()))?;
+
+        match escrow.as_ref() {
+            Some(mgr) => mgr
+                .aggregate_stats()
+                .map(Some)
+                .map_err(|e| CoordinationFreeError::SchemaError(e.to_string())),
+            None => Ok(None),
+        }
+    }
+
+    /// Get available escrow quota for a resource.
+    pub fn available_escrow(&self, resource_id: &str) -> Option<i64> {
+        let escrow = self.escrow.read().ok()?;
+        escrow.as_ref()?.available_quota(resource_id)
+    }
 }
 
 #[cfg(test)]
@@ -849,5 +1058,154 @@ mod tests {
         // Value should be immediately visible
         let value = manager.get_state("key").unwrap().unwrap();
         assert_eq!(value.as_integer(), Some(10));
+    }
+
+    // =========================================================================
+    // Escrow Integration Tests (POAC Paper Section 5)
+    // =========================================================================
+
+    #[test]
+    fn test_escrow_not_enabled_by_default() {
+        let manager = CoordinationFreeManager::new(NodeId::new("node-1"));
+        assert!(!manager.has_escrow());
+    }
+
+    #[test]
+    fn test_escrow_enabled_with_config() {
+        let manager = CoordinationFreeManager::with_escrow(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            EscrowConfig::default(),
+        );
+        assert!(manager.has_escrow());
+    }
+
+    #[test]
+    fn test_escrow_consume_local() {
+        let manager = CoordinationFreeManager::with_escrow(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            EscrowConfig::default(),
+        );
+
+        // Register a resource
+        manager.register_escrow_resource("inventory:sku1", 1000, 50).unwrap();
+
+        // Consume quota
+        let result = manager.consume_escrow("inventory:sku1", 10);
+        assert!(matches!(result, EscrowResult::Success { remaining: 40 }));
+
+        // Check remaining
+        assert_eq!(manager.available_escrow("inventory:sku1"), Some(40));
+    }
+
+    #[test]
+    fn test_escrow_quota_exhaustion_triggers_coordination() {
+        let manager = CoordinationFreeManager::with_escrow(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            EscrowConfig::default(),
+        );
+
+        manager.register_escrow_resource("counter", 1000, 5).unwrap();
+
+        // Consume all quota
+        for _ in 0..5 {
+            let result = manager.consume_escrow("counter", 1);
+            assert!(result.is_success());
+        }
+
+        // Next consume should need coordination
+        let result = manager.consume_escrow("counter", 1);
+        assert!(result.needs_coordination());
+    }
+
+    #[test]
+    fn test_escrow_replenish() {
+        let manager = CoordinationFreeManager::with_escrow(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            EscrowConfig::default(),
+        );
+
+        manager.register_escrow_resource("counter", 1000, 10).unwrap();
+
+        // Exhaust quota
+        for _ in 0..10 {
+            manager.consume_escrow("counter", 1);
+        }
+        assert_eq!(manager.available_escrow("counter"), Some(0));
+
+        // Replenish
+        manager.replenish_escrow("counter", 10).unwrap();
+        assert_eq!(manager.available_escrow("counter"), Some(10));
+    }
+
+    #[test]
+    fn test_escrow_auto_quota() {
+        let manager = CoordinationFreeManager::with_escrow(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            EscrowConfig::default(),
+        );
+
+        // At 100 requests/second, optimal quota should be around 117
+        let quota = manager.register_escrow_resource_auto("counter", 1000, 100.0).unwrap();
+        assert!(quota >= 110 && quota <= 130, "Expected ~117, got {}", quota);
+    }
+
+    #[test]
+    fn test_escrow_stats() {
+        let manager = CoordinationFreeManager::with_escrow(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            EscrowConfig::default(),
+        );
+
+        manager.register_escrow_resource("counter", 1000, 10).unwrap();
+
+        // Do some operations
+        for _ in 0..8 {
+            manager.consume_escrow("counter", 1);
+        }
+
+        let stats = manager.escrow_stats("counter").unwrap().unwrap();
+        assert_eq!(stats.local_operations, 8);
+        assert_eq!(stats.coordination_events, 0);
+    }
+
+    #[test]
+    fn test_escrow_aggregate_stats() {
+        let manager = CoordinationFreeManager::with_escrow(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            EscrowConfig::default(),
+        );
+
+        manager.register_escrow_resource("r1", 1000, 10).unwrap();
+        manager.register_escrow_resource("r2", 2000, 20).unwrap();
+
+        for _ in 0..5 {
+            manager.consume_escrow("r1", 1);
+            manager.consume_escrow("r2", 1);
+        }
+
+        let stats = manager.escrow_aggregate_stats().unwrap().unwrap();
+        assert_eq!(stats.resource_count, 2);
+        assert_eq!(stats.total_local_operations, 10);
+    }
+
+    #[test]
+    fn test_full_config_with_escrow() {
+        let manager = CoordinationFreeManager::with_full_config(
+            NodeId::new("node-1"),
+            CoordinationFreeConfig::default(),
+            SpeculativeConfig::default(),
+            Some(EscrowConfig::default()),
+        );
+
+        assert!(manager.has_escrow());
+        manager.register_escrow_resource("test", 100, 10).unwrap();
+        assert!(manager.consume_escrow("test", 5).is_success());
     }
 }

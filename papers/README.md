@@ -51,12 +51,13 @@ Formal proof that speculative execution preserves serializability. Key contribut
 
 **Implementation:** `SpeculativeBuffer` with visibility invariant, `ConflictProbabilityTracker` with EMA learning, and `commit_with_speculation()` in `CoordinationFreeManager`. 11 tests validate the formal guarantees.
 
-### POAC (Research/Partially Implemented)
+### POAC (Implemented)
 
-Explores probabilistic techniques for further performance optimization:
+All four POAC techniques are now implemented:
 - **Bloom filter write-sets** [Implemented] — O(1) conflict detection with POAC Table 1 validation
 - **Speculative execution** [Implemented] — Adaptive threshold with EMA probability learning
-- **Escrow transactions** [Future] — Hot spot scalability via pre-allocated quotas
+- **Escrow transactions** [Implemented] — Hot spot scalability via Poisson-based quota sizing
+- **Algebraic classification** [Implemented] — Automatic merge for semilattice/Abelian operations
 
 ## Citation
 
