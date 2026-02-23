@@ -322,7 +322,7 @@ The LEP of consensus grows quadratically while coordination-free LEP remains con
 
 Using typical values: $P_{active} = 65W$, $P_{idle} = 22W$, $R = 3$, $T_{compute} = 1ms$, $T_{communicate} = 0.1ms$:
 
-| Latency | E_compute | E_comm | E_wait | E_total | Wait % |
+| One-way Latency (L) | E_compute | E_comm | E_wait | E_total | Wait % |
 |---------|-----------|--------|--------|---------|--------|
 | 0.1 ms | 65 mJ | 6.5 mJ | 13 mJ | 85 mJ | 15.4% |
 | 1 ms | 65 mJ | 6.5 mJ | 132 mJ | 204 mJ | 64.9% |
