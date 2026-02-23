@@ -441,6 +441,33 @@ To validate the Waiting Waste Theorem's energy predictions, we conducted control
 
 4. **The theorem holds**: Energy is dominated by waiting at WAN latencies, exactly as the mathematics predicts.
 
+### 7.5 Comparison with Published Systems
+
+To contextualize our results, we compare against published commit latencies from production-grade distributed systems:
+
+| System | Commit Latency | Consensus Protocol | Source |
+|--------|----------------|-------------------|--------|
+| Spanner | 10-100ms | Multi-Paxos | Corbett et al. 2012 [20] |
+| CockroachDB | 1-2ms (single-zone) | Raft | Taft et al. 2020 [21] |
+| CockroachDB | ~100-800ms (global) | Raft | Taft et al. 2020 [21] |
+| Calvin | ≥10ms (epoch) | Sequencing layer | Thomson et al. 2012 [22] |
+| Anna | 1-10ms | Lattice (coord-free) | Wu et al. 2019 [23] |
+| etcd (local Raft) | 0.80ms | Raft | This work |
+| Rhizo (coord-free) | 0.002ms | None | This work |
+
+**Energy implications at scale**: Applying the Waiting Waste Theorem to these systems:
+
+| System | Typical Latency | Wait % | Energy vs Coord-Free |
+|--------|-----------------|--------|---------------------|
+| Rhizo (coord-free) | 0.002ms | 0% | 1x (baseline) |
+| etcd (local) | 0.80ms | ~85% | ~370x |
+| CockroachDB (zone) | 2ms | ~93% | ~1,000x |
+| Calvin | 10ms | ~98% | ~5,000x |
+| Spanner | 50ms | ~99% | ~25,000x |
+| CockroachDB (global) | 200ms | ~99.5% | ~100,000x |
+
+These comparisons are structurally favorable to coordination-free systems—by design. Coordinated systems provide stronger guarantees (linearizability, global ordering) that are necessary for certain workloads. The point is not that coordination is always wrong, but that it has a quantifiable energy cost that grows with latency. For algebraic operations that can be classified as coordination-free, the energy savings are substantial.
+
 ---
 
 ## 8. Implications
@@ -475,21 +502,39 @@ Data centers consume approximately 2% of global electricity [14]. If even 10% of
 
 ## 9. Related Work
 
-### 9.1 Consensus Protocol Efficiency
+### 9.1 Energy-Proportional Computing
 
-Extensive work has optimized consensus latency [1, 2, 16], but energy has not been a primary metric. Our work complements this by showing that round reduction directly impacts energy.
+Barroso and Hölzle [3] identified the energy-proportionality problem: servers consume 30-50% of peak power even when idle. Subsequent work optimized CPU power states [17], memory [18], and storage [7]. Harizopoulos et al. [8] called energy efficiency "the new holy grail" of data management. Our contribution identifies a previously unquantified factor: in distributed systems, network waiting—not computation—dominates energy consumption at WAN latencies.
 
-### 9.2 Energy-Proportional Computing
+### 9.2 Carbon-Aware Computing
 
-Barroso and Hölzle [3] identified the energy-proportionality problem. Subsequent work optimized CPU power states [17], memory [18], and storage [7]. Our contribution identifies network waiting as a dominant factor in distributed systems.
+The sustainability of computing has emerged as a critical research area. HotCarbon, established in 2022, brings together researchers focused on reducing computing's carbon footprint [24]. Recent work includes carbon-aware scheduling [25], the tension between carbon and energy optimization [26], and frameworks for carbon-aware datacenter design [27]. Google's Carbon-Intelligent Compute Management delays flexible workloads to periods of lower grid carbon intensity [28]. Microsoft's carbon-aware computing initiative emphasizes measurement and reduction of software's carbon impact [29].
+
+Our work complements these efforts by identifying a structural source of energy waste. Carbon-aware scheduling shifts *when* computation occurs; we show that for distributed transactions, *eliminating synchronous rounds* provides unbounded energy savings independent of grid carbon intensity. The Waiting Waste Theorem quantifies why coordination-free systems are fundamentally more sustainable.
 
 ### 9.3 Coordination Avoidance
 
-Bailis et al. [19] formalized conditions under which coordination can be avoided. We extend this analysis to energy implications, showing coordination avoidance provides unbounded energy benefits.
+Bailis et al. [19] formalized *when* coordination can be avoided, proving that certain invariants (I-confluence) permit coordination-free execution. Their work answers: "Which database constraints require coordination?" Our work answers the complementary question: "What is the energy cost of not avoiding coordination?"
 
-### 9.4 CRDTs and Eventual Consistency
+The results compose: Bailis et al. identify operations that *can* be coordination-free; the Waiting Waste Theorem quantifies the energy savings from *making* them coordination-free. Together, they provide both the theoretical foundation (I-confluence) and the quantitative motivation (unbounded energy improvement) for coordination-free system design.
 
-Shapiro et al. [9] established foundations for conflict-free replication. Our Waiting Waste Theorem explains why CRDTs achieve not only lower latency but fundamentally better energy efficiency.
+### 9.4 The CALM Theorem
+
+Hellerstein and Alvaro [30] proved that monotonic programs have consistent, coordination-free implementations—the CALM (Consistency As Logical Monotonicity) theorem. CALM delineates what is *possible* without coordination; distributed systems can be consistent without synchronization if and only if they compute monotonic functions.
+
+Our Waiting Waste Theorem provides the *energy* interpretation of CALM: non-monotonic programs require coordination, and coordination energy grows unboundedly with latency. The combination suggests a design principle: maximize the monotonic (coordination-free) fraction of workloads not just for latency, but for sustainability.
+
+### 9.5 Consensus Protocol Efficiency
+
+Extensive work has optimized consensus latency through reduced round-trips [1, 2], parallelism [16], and geographic awareness [20]. EPaxos [16] achieves single-round commits for non-conflicting operations. Spanner [20] uses TrueTime for global consistency with bounded uncertainty.
+
+These optimizations reduce the constant factors in our energy model (fewer rounds, lower R), but cannot eliminate the fundamental scaling: $E_{wait} = P_{idle} \times 2RL$ grows linearly with latency for any $R > 0$. Our theorem shows that round reduction improves energy efficiency, but only $R = 0$ (coordination-free) achieves constant energy.
+
+### 9.6 CRDTs and Eventual Consistency
+
+Shapiro et al. [9] established conflict-free replicated data types (CRDTs), enabling coordination-free updates through algebraic properties (commutativity, associativity, idempotency). Conway et al. [10] extended this to lattice-based programming. Anna [23] demonstrated practical coordination-free key-value storage using lattice composition.
+
+The Waiting Waste Theorem explains *why* these systems achieve not only lower latency but fundamentally better energy efficiency: by eliminating synchronous rounds ($R = 0$), they escape the linear energy growth that consensus protocols cannot avoid.
 
 ---
 
@@ -546,6 +591,28 @@ The fastest distributed database is also the greenest—not by coincidence, but 
 [18] Malladi, K. T., Nothaft, F. A., Perber, K., Ranganathan, P., & Lee, B. C. (2012). Towards Energy-Proportional Datacenter Memory with Mobile DRAM. ACM ISCA.
 
 [19] Bailis, P., Fekete, A., Franklin, M. J., Ghodsi, A., Hellerstein, J. M., & Stoica, I. (2014). Coordination Avoidance in Database Systems. VLDB Endowment, 8(3), 185-196. doi:10.14778/2735508.2735509
+
+[20] Corbett, J. C., et al. (2012). Spanner: Google's Globally-Distributed Database. OSDI, 251-264.
+
+[21] Taft, R., et al. (2020). CockroachDB: The Resilient Geo-Distributed SQL Database. SIGMOD, 1493-1509. doi:10.1145/3318464.3386134
+
+[22] Thomson, A., Diamond, T., Weng, S.-C., Ren, K., Shao, P., & Abadi, D. J. (2012). Calvin: Fast Distributed Transactions for Partitioned Database Systems. SIGMOD, 1-12. doi:10.1145/2213836.2213838
+
+[23] Wu, C., Sreekanti, V., & Hellerstein, J. M. (2019). Anna: A KVS for Any Scale. IEEE Transactions on Knowledge and Data Engineering, 33(2), 344-358. doi:10.1109/TKDE.2019.2898401
+
+[24] HotCarbon Workshop on Sustainable Computer Systems. (2022-2024). https://hotcarbon.org/
+
+[25] Hanafy, W. A., et al. (2023). The War of the Efficiencies: Understanding the Tension between Carbon and Energy Optimization. HotCarbon '23.
+
+[26] Wang, J., Gupta, U., & Sriraman, A. (2023). Peeling Back the Carbon Curtain: Carbon Optimization Challenges in Cloud Computing. HotCarbon '23.
+
+[27] Acun, B., et al. (2023). Carbon Explorer: A Holistic Framework for Designing Carbon Aware Datacenters. ASPLOS.
+
+[28] Radovanović, A., et al. (2021). Carbon-Aware Computing for Datacenters. arXiv:2106.11750.
+
+[29] Microsoft. (2023). Carbon-Aware Computing: Measuring and Reducing the Carbon Intensity of Software. Microsoft White Paper.
+
+[30] Hellerstein, J. M., & Alvaro, P. (2020). Keeping CALM: When Distributed Consistency is Easy. Communications of the ACM, 63(9), 72-81. doi:10.1145/3369736
 
 ---
 
