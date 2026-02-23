@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-02-22T22:46:00.043192",
+  "model_parameters": {
+    "P_active": 65,
+    "P_idle": 22,
+    "T_compute": 0.001,
+    "R": 3
+  },
+  "codecarbon_available": true,
+  "rhizo": {
+    "system": "Rhizo (coordination-free)",
+    "operation": "algebraic ADD",
+    "iterations": 10000,
+    "total_time_s": 0.02420490002259612,
+    "energy_joules": 1.613777001257404,
+    "avg_power_watts": 66.67150038838776,
+    "energy_per_op_joules": 0.0001613777001257404,
+    "latency_ms_mean": 0.0022347600577631967,
+    "latency_ms_p99": 0.011900003300979733
+  },
+  "etcd": {
+    "system": "etcd Raft (local)",
+    "operation": "PUT key-value",
+    "iterations": 200,
+    "total_time_s": 0.15979150001658127,
+    "energy_joules": 11.929264484513453,
+    "avg_power_watts": 74.65518806241619,
+    "energy_per_op_joules": 0.05964632242256727,
+    "latency_ms_mean": 0.7981304996064864,
+    "latency_ms_p99": 1.2208130181534216
+  },
+  "validation": {
+    "measured_energy_per_tx_mJ": 59.646322422567266,
+    "measured_latency_ms": 0.7981304996064864,
+    "model_E_compute_mJ": 65.0,
+    "model_E_wait_mJ": 0,
+    "model_E_total_mJ": 65.0,
+    "model_wait_fraction": 0.0,
+    "measurement_vs_model_ratio": 0.9176357295779579,
+    "model_accuracy_percent": 91.76357295779579
+  },
+  "theoretical_table": [
+    {
+      "RTT_ms": 1,
+      "E_compute_mJ": 65.0,
+      "E_wait_mJ": 66.0,
+      "E_total_mJ": 131.0,
+      "wait_percent": 50.4
+    },
+    {
+      "RTT_ms": 2,
+      "E_compute_mJ": 65.0,
+      "E_wait_mJ": 132.0,
+      "E_total_mJ": 197.0,
+      "wait_percent": 67.0
+    },
+    {
+      "RTT_ms": 5,
+      "E_compute_mJ": 65.0,
+      "E_wait_mJ": 330.0,
+      "E_total_mJ": 395.0,
+      "wait_percent": 83.5
+    },
+    {
+      "RTT_ms": 10,
+      "E_compute_mJ": 65.0,
+      "E_wait_mJ": 660.0,
+      "E_total_mJ": 725.0,
+      "wait_percent": 91.0
+    },
+    {
+      "RTT_ms": 50,
+      "E_compute_mJ": 65.0,
+      "E_wait_mJ": 3300.0,
+      "E_total_mJ": 3365.0,
+      "wait_percent": 98.1
+    },
+    {
+      "RTT_ms": 100,
+      "E_compute_mJ": 65.0,
+      "E_wait_mJ": 6600.0,
+      "E_total_mJ": 6665.0,
+      "wait_percent": 99.0
+    }
+  ],
+  "speedup": {
+    "latency": 357.1,
+    "energy": 369.6
+  }
+}
