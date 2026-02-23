@@ -584,16 +584,22 @@ impl EscrowManager {
             .read()
             .map_err(|_| EscrowError::LockError("resources".to_string()))?;
 
-        let mut stats = EscrowAggregateStats::default();
-        stats.resource_count = resources.len();
+        let mut total_local_operations = 0u64;
+        let mut total_coordination_events = 0u64;
+        let mut total_consumed = 0i64;
 
         for resource in resources.values() {
-            stats.total_local_operations += resource.stats.local_operations;
-            stats.total_coordination_events += resource.stats.coordination_events;
-            stats.total_consumed += resource.stats.total_consumed;
+            total_local_operations += resource.stats.local_operations;
+            total_coordination_events += resource.stats.coordination_events;
+            total_consumed += resource.stats.total_consumed;
         }
 
-        Ok(stats)
+        Ok(EscrowAggregateStats {
+            resource_count: resources.len(),
+            total_local_operations,
+            total_coordination_events,
+            total_consumed,
+        })
     }
 
     /// Check if a resource needs coordination (quota below threshold)
