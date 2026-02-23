@@ -361,11 +361,11 @@ At scale, even modest fractions of coordination-avoidable transactions yield sig
 
 | Component | Calculation | Annual Energy |
 |-----------|-------------|---------------|
-| Cross-region consensus (1B/day) | 1B × 365 × 6.6J | 2,400 GWh |
-| If 50% were coordination-free | 500M × 365 × 6.6J saved | 1,200 GWh savings |
-| If 90% were coordination-free | 900M × 365 × 6.6J saved | 2,160 GWh savings |
+| Cross-region consensus (1B/day) | 1B × 365 × 6.6J | 669 MWh |
+| If 50% were coordination-free | 500M × 365 × 6.6J saved | 335 MWh savings |
+| If 90% were coordination-free | 900M × 365 × 6.6J saved | 602 MWh savings |
 
-For context, 1,200 GWh is roughly the annual output of a 150 MW power plant. The savings scale linearly with the algebraic fraction—the portion of transactions that can be classified as coordination-free.
+For context, 669 MWh represents approximately $67,000 in annual electricity costs and 270 tonnes of CO₂ emissions per billion daily transactions. Across the industry—with hundreds of billions of daily distributed transactions—the aggregate waste is substantial.
 
 ---
 
@@ -503,13 +503,9 @@ These comparisons are structurally favorable to coordination-free systems—by d
 
 ### 8.2 For Sustainability
 
-Data centers consume approximately 2% of global electricity [14]. If even 10% of distributed transactions could shift from consensus to coordination-free approaches, the energy savings would be substantial.
+Data centers consume approximately 2% of global electricity [14]. As Section 6.3 quantifies, even modest coordination avoidance yields meaningful savings: 600 MWh annually per billion cross-region transactions, representing $60,000 in electricity costs and 270 tonnes of CO₂.
 
-**Projection**: At 10 billion daily transactions (conservative estimate for major cloud providers) and 99% wait fraction at global latencies:
-
-- Current: ~24 TWh annually in waiting waste
-- Coordination-free: ~0.24 TWh annually
-- Savings: ~24 TWh annually (equivalent to ~3 nuclear power plants)
+Across the industry—with hundreds of cloud services each processing billions of daily transactions—the aggregate impact compounds. If coordination-free designs captured even 10% of cross-region transaction volume, the cumulative savings would reach tens of GWh annually, equivalent to removing thousands of cars from roads.
 
 ### 8.3 For Future Research
 
