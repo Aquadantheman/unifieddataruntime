@@ -20,6 +20,10 @@ fs2 = { workspace = true }
 arrow = { workspace = true }
 parquet = { workspace = true }
 
+# Phase 5: Network layer
+tokio = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 rand = "0.8"
+tracing-subscriber = "0.3"

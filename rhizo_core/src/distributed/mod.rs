@@ -107,6 +107,7 @@
 //! ```
 
 mod local_commit;
+pub mod network;
 pub mod simulation;
 mod vector_clock;
 
@@ -114,11 +115,9 @@ pub use local_commit::{
     AlgebraicOperation, AlgebraicTransaction, LocalCommitError, LocalCommitProtocol,
     VersionedUpdate,
 };
+pub use network::{NetworkConfig, NetworkError, NetworkMessage, NetworkNode, NetworkStats};
 pub use simulation::{
     Message, NetworkCondition, SimulatedCluster, SimulatedNode, SimulationBuilder,
     SimulationConfig, SimulationStats,
 };
 pub use vector_clock::{CausalOrder, NodeId, VectorClock};
-
-// Future modules (Phase 5+):
-// mod gossip;

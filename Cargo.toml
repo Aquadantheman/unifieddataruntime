@@ -19,3 +19,6 @@ arrow = { version = "57", default-features = false, features = ["ipc"] }
 parquet = { version = "57", default-features = false, features = ["arrow", "zstd", "snap", "lz4"] }
 tracing = "0.1"
 fs2 = "0.4"
+
+# Phase 5: Network layer
+tokio = { version = "1.43", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time"] }
