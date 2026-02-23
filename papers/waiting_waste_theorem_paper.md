@@ -435,13 +435,26 @@ To validate the Waiting Waste Theorem's energy predictions, we conducted control
 
 1. **Latency claims are measured**: The 59x and 355x speedups are real measurements against real systems.
 
-2. **Energy model is sound**: Systems consume ~22W idle power during network waits, validating the theorem's assumptions.
+2. **Waiting energy model is validated**: The `time.sleep()` experiments confirm systems consume ~22W idle power during waits, and energy scales linearly with wait duration.
 
 3. **Projections are conservative**: Geo-distributed estimates add only network RTT; real consensus adds further overhead.
 
-4. **The theorem holds**: Energy is dominated by waiting at WAN latencies, exactly as the mathematics predicts.
+4. **The theorem's structure is sound**: At localhost latencies, compute dominates (Section 7.5); at WAN latencies, waiting dominates (Section 6). The crossover occurs exactly where the model predicts.
 
-### 7.5 Comparison with Published Systems
+### 7.5 Measured Raft Consensus Energy
+
+We measured energy consumption of etcd, a production Raft implementation, using CodeCarbon with Intel RAPL:
+
+| System | Operation | Latency | Energy/tx | Speedup |
+|--------|-----------|---------|-----------|---------|
+| Rhizo (coord-free) | Algebraic ADD | 0.002ms | 0.16 mJ | 1x |
+| etcd (local Raft) | PUT key-value | 0.80ms | 59.6 mJ | — |
+
+**Result**: Coordination-free commits use **370x less energy** than local Raft consensus.
+
+At localhost latencies, etcd's energy is dominated by compute (Raft log serialization, fsync), not waiting. This measurement validates the compute component of our model. The waiting component dominates only at WAN latencies, as Section 6 quantifies.
+
+### 7.6 Comparison with Published Systems
 
 To contextualize our results, we compare against published commit latencies from production-grade distributed systems:
 
@@ -455,18 +468,22 @@ To contextualize our results, we compare against published commit latencies from
 | etcd (local Raft) | 0.80ms | Raft | This work |
 | Rhizo (coord-free) | 0.002ms | None | This work |
 
-**Energy implications at scale**: Applying the Waiting Waste Theorem to these systems:
+**Energy implications**: We apply the energy model to these published latencies. For each system, we decompose total commit time into compute ($T_c \approx 1ms$) and waiting ($T_w = T_{commit} - T_c$), then calculate:
 
-| System | Typical Latency | Wait % | Energy vs Coord-Free |
-|--------|-----------------|--------|---------------------|
-| Rhizo (coord-free) | 0.002ms | 0% | 1x (baseline) |
-| etcd (local) | 0.80ms | ~85% | ~370x |
-| CockroachDB (zone) | 2ms | ~93% | ~1,000x |
-| Calvin | 10ms | ~98% | ~5,000x |
-| Spanner | 50ms | ~99% | ~25,000x |
-| CockroachDB (global) | 200ms | ~99.5% | ~100,000x |
+$$E_{total} = P_{active} \cdot T_c + P_{idle} \cdot T_w$$
 
-These comparisons are structurally favorable to coordination-free systems—by design. Coordinated systems provide stronger guarantees (linearizability, global ordering) that are necessary for certain workloads. The point is not that coordination is always wrong, but that it has a quantifiable energy cost that grows with latency. For algebraic operations that can be classified as coordination-free, the energy savings are substantial.
+| System | Latency | Wait % | Energy | vs Coord-Free |
+|--------|---------|--------|--------|---------------|
+| Rhizo (coord-free) | 0.002ms | 0% | 0.13 mJ | 1x |
+| etcd (local) | 0.80ms | 0% | 52 mJ | ~50x |
+| CockroachDB (zone) | 2ms | 25% | 87 mJ | ~67x |
+| Calvin | 10ms | 75% | 263 mJ | ~202x |
+| Spanner | 50ms | 94% | 1,143 mJ | ~879x |
+| CockroachDB (global) | 200ms | 99% | 4,443 mJ | ~3,418x |
+
+*Note: etcd at localhost has latency < $T_c$, so Wait% = 0 (all compute). At WAN latencies, waiting dominates.*
+
+These comparisons are structurally favorable to coordination-free systems—by design. Coordinated systems provide stronger guarantees (linearizability, global ordering) that are necessary for certain workloads. The point is not that coordination is always wrong, but that it has a quantifiable energy cost that grows with latency. For algebraic operations that can be classified as coordination-free, the energy savings are substantial—and the advantage grows from 50x at localhost to 3,400x at global scale.
 
 ---
 
