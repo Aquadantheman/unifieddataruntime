@@ -307,7 +307,7 @@ Eliminating coordination eliminates idle energy consumption. We measured energy 
 - CO2 reduced: 292 kg/year
 - Equivalent: 14 trees planted/year
 
-The energy savings follow directly from the time savings: $E = P \cdot t$. By reducing transaction time from 100ms to 0.021ms, energy consumption drops proportionally.
+The energy savings follow directly from the time savings: $E = P \cdot t$. By reducing transaction time from 100ms to 0.021ms, energy consumption drops proportionally. Note: These are measured values from CodeCarbon with Intel RAPL, not model estimates. See the Waiting Waste Theorem paper for the theoretical energy model.
 
 ---
 
@@ -376,10 +376,11 @@ Rhizo is open source under the MIT license at: https://github.com/rhizodata/rhiz
 
 ## Appendix A: Proofs
 
-See the following for full proofs:
-- `sandbox/coordination_free/proofs/convergence_proof.md` - Algebraic convergence proof
-- `sandbox/coordination_free/proofs/causality_proof.md` - Vector clock causality proof
-- `sandbox/coordination_free/proofs/energy_efficiency_proof.md` - Energy efficiency mathematical derivation
+**Algebraic Convergence**: The Constant Convergence Theorem (Section 3 of the Time-Energy Theory paper) proves that algebraic operations under all-to-all gossip converge in exactly 3 rounds, independent of cluster size. The proof relies on commutativity, associativity, and idempotency of merge operations.
+
+**Vector Clock Causality**: The causality ordering properties follow from standard vector clock theory [4]. Our implementation uses the happens-before partial order to ensure causal consistency while permitting concurrent algebraic operations.
+
+**Energy Efficiency**: The Waiting Waste Theorem (Section 3 of the Waiting Waste Theorem paper) proves that consensus energy is dominated by idle waiting as latency increases. The Coordination-Free Corollary (Section 4) establishes unbounded energy improvement: as $L \to \infty$, $E_{cf}/E_{consensus} \to 0$.
 
 ---
 

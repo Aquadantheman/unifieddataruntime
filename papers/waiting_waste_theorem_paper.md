@@ -202,15 +202,19 @@ $$P_{idle} \times 2RL > \tau C + \tau P_{idle} \times 2RL$$
 
 $$P_{idle} \times 2RL (1 - \tau) > \tau C$$
 
-$$L > \frac{\tau C}{2RP_{idle}(1-\tau)} = \frac{C(1-\tau)}{2RP_{idle}\tau}$$
+$$L > \frac{\tau C}{2RP_{idle}(1-\tau)}$$
 
-Note: The final simplification corrects the algebra. □
+□
 
-**Example**: For $\tau = 0.9$ (90% waiting), $C = 65mJ$, $R = 3$, $P_{idle} = 22W$:
+**Example**: Using C = 71.5mJ, R = 3, P_idle = 22W:
 
-$$L > \frac{0.065 \times 0.1}{2 \times 3 \times 22 \times 0.9} = \frac{0.0065}{118.8} \approx 0.055ms$$
+| Wait Fraction | Latency Threshold |
+|---------------|-------------------|
+| 50%  | L > 0.54 ms  |
+| 90%  | L > 4.9 ms   |
+| 98%  | L > 26.5 ms  |
 
-Even at sub-millisecond latencies, waiting dominates. This explains why WAN transactions are so inefficient.
+At just 0.5ms latency, half the energy is wasted waiting. At 5ms, 90% is wasted. At 25ms, 98% is wasted. This explains why WAN transactions are so inefficient.
 
 ---
 
@@ -255,22 +259,28 @@ $$\lim_{L \to \infty} \frac{E_{cf}}{E_{consensus}} = 0$$
 
 **Corollary 2 (Energy Improvement Factor)**: At latency $L$, the energy improvement factor is:
 
-$$\text{Improvement} = \frac{E_{consensus}}{E_{cf}} = \frac{C + P_{idle} \times 2RL}{P_{active} \times T_{compute}}$$
+$$\text{Improvement} = \frac{E_{consensus}}{E_{cf}} = \frac{C + P_{idle} \times 2RL}{E_{cf}}$$
 
 For large $L$:
-$$\text{Improvement} \approx \frac{2RP_{idle}L}{P_{active} \times T_{compute}}$$
+$$\text{Improvement} \approx \frac{2RP_{idle}L}{E_{cf}}$$
 
 The improvement grows linearly with latency.
 
-**Example**: For $R = 3$, $P_{idle} = 22W$, $P_{active} = 65W$, $T_{compute} = 1ms$:
+**Note on E_cf**: Coordination-free transactions complete in $T_{cf} \approx 20\mu s$ (local algebraic commit), not the $T_{compute} = 1ms$ required by consensus (which includes serialization, validation, and replication). Thus:
 
-| Latency | Improvement Factor |
-|---------|-------------------|
-| 1 ms | 101x |
-| 10 ms | 1,018x |
-| 50 ms | 5,082x |
-| 100 ms | 10,157x |
-| 150 ms | 15,232x |
+$$E_{cf} = P_{active} \times T_{cf} = 65W \times 0.00002s = 1.3mJ$$
+
+**Example**: For $R = 3$, $P_{idle} = 22W$, $P_{active} = 65W$, $T_{compute} = 1ms$, $E_{cf} = 1.3mJ$:
+
+Using $E_{consensus} = E_{compute} + E_{wait} = P_{active} T_{compute} + P_{idle} \cdot R \cdot RTT$:
+
+| RTT | E_compute | E_wait | E_consensus | Improvement |
+|-----|-----------|--------|-------------|-------------|
+| 1 ms | 65 mJ | 66 mJ | 131 mJ | 101x |
+| 10 ms | 65 mJ | 660 mJ | 725 mJ | 558x |
+| 50 ms | 65 mJ | 3,300 mJ | 3,365 mJ | 2,588x |
+| 100 ms | 65 mJ | 6,600 mJ | 6,665 mJ | 5,127x |
+| 150 ms | 65 mJ | 9,900 mJ | 9,965 mJ | 7,665x |
 
 ---
 

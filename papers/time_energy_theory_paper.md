@@ -115,11 +115,13 @@ State unchanged, but nodes have confirmed mutual receipt.
 
 **Why 3 Rounds is Necessary**:
 
-Round 1 is necessary: Without it, nodes don't know others' operations.
+Round 1 achieves *state convergence*: all nodes compute the same merged state.
 
-Round 2 is necessary: After round 1, node A knows the merged state but doesn't know if node B received A's broadcast.
+Round 2 achieves *mutual awareness*: after round 2, each node knows all other nodes have received the merged state (since all received states match).
 
-Round 3 is necessary: This establishes "common knowledge"—everyone knows that everyone knows that everyone has converged. This is the minimum requirement for distributed agreement [5].
+Round 3 achieves *convergence detection*: each node can safely act on the converged state (e.g., confirm to clients) because it knows all other nodes know convergence has occurred. Without round 3, a node might act while another node is still uncertain.
+
+While state convergence requires only 1 round, *safe action* on the converged state requires 3 rounds to ensure no node acts prematurely while others are still uncertain [5].
 
 ### 3.4 Complexity Analysis
 
@@ -156,13 +158,15 @@ where:
 
 ### 4.2 Time Scaling
 
-For consensus with $R$ round-trips at latency $L$:
+For consensus with $R$ round-trips at one-way network latency $L$:
 
 $$T_{compute} = O(1)$$ (constant)
 
-$$T_{communicate} = O(M/B)$$ (message/bandwidth, typically microseconds)
+$$T_{communicate} = O\left(\frac{M}{B}\right)$$ (message/bandwidth, typically microseconds)
 
-$$T_{wait} = R \times L$$ (grows linearly with latency)
+$$T_{wait} = 2RL$$ (grows linearly with latency)
+
+Each round-trip requires sending a message (latency $L$) and receiving a response (latency $L$), hence $2L$ per round. With $R$ rounds, total wait time is $2RL$.
 
 Key observation: $T_{wait}$ grows linearly with $L$ while $T_{compute}$ and $T_{communicate}$ are bounded.
 
@@ -178,11 +182,11 @@ As network latency increases, waiting energy dominates all other energy costs.
 
 Let $C = P_{active} \times (T_{compute} + T_{communicate})$, a constant for given hardware.
 
-$$\frac{E_{wait}}{E_{total}} = \frac{P_{idle} \times R \times L}{C + P_{idle} \times R \times L} = \frac{1}{\frac{C}{P_{idle} \times R \times L} + 1}$$
+$$\frac{E_{wait}}{E_{total}} = \frac{P_{idle} \cdot 2RL}{C + P_{idle} \cdot 2RL} = \frac{1}{\frac{C}{P_{idle} \cdot 2RL} + 1}$$
 
 As $L \to \infty$:
 
-$$\frac{C}{P_{idle} \times R \times L} \to 0$$
+$$\frac{C}{P_{idle} \cdot 2RL} \to 0$$
 
 $$\frac{E_{wait}}{E_{total}} \to 1$$
 
@@ -196,20 +200,22 @@ The energy advantage grows unboundedly with network latency.
 
 *Proof*: With $R = 0$, $E_{wait} = 0$, so $E_{cf} = E_{compute}$ only. The ratio:
 
-$$\frac{E_{cf}}{E_{consensus}} = \frac{E_{compute}}{C + P_{idle} \times R \times L} \to 0$$
+$$\frac{E_{cf}}{E_{consensus}} = \frac{E_{compute}}{C + P_{idle} \cdot 2RL} \to 0$$
 
 ### 4.6 Quantitative Analysis
 
 Using typical values ($P_{active} = 65W$, $P_{idle} = 22W$, $R = 3$):
 
-| Latency | E_compute | E_wait | E_total | Wait % | Improvement* |
-|---------|-----------|--------|---------|--------|--------------|
+| RTT | E_compute | E_wait | E_total | Wait % | Improvement* |
+|-----|-----------|--------|---------|--------|--------------|
 | 1 ms | 65 mJ | 66 mJ | 131 mJ | 50.4% | 101x |
 | 10 ms | 65 mJ | 660 mJ | 725 mJ | 91.0% | 558x |
 | 50 ms | 65 mJ | 3,300 mJ | 3,365 mJ | 98.1% | 2,588x |
 | 100 ms | 65 mJ | 6,600 mJ | 6,665 mJ | 99.0% | 5,127x |
 
-*Improvement vs coordination-free at 1.3 mJ/transaction
+*RTT = round-trip time = $2L$ where $L$ is one-way latency.
+
+**Note on E_cf**: The coordination-free energy $E_{cf} = 1.3mJ$ is derived from $E_{cf} = P_{active} \times T_{cf}$, where $T_{cf} \approx 20\mu s$ is the measured local commit time for algebraic operations (vs. $T_{compute} = 1ms$ for consensus which includes serialization, validation, and replication overhead). Thus $E_{cf} = 65W \times 0.00002s = 1.3mJ$. The improvement factor compares consensus total energy to this coordination-free baseline.
 
 ---
 
