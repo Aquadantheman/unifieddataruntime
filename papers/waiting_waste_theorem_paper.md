@@ -474,16 +474,16 @@ $$E_{total} = P_{active} \cdot T_c + P_{idle} \cdot T_w$$
 
 | System | Latency | Wait % | Energy | vs Coord-Free |
 |--------|---------|--------|--------|---------------|
-| Rhizo (coord-free) | 0.002ms | 0% | 0.13 mJ | 1x |
-| etcd (local) | 0.80ms | 0% | 52 mJ | ~50x |
-| CockroachDB (zone) | 2ms | 25% | 87 mJ | ~67x |
-| Calvin | 10ms | 75% | 263 mJ | ~202x |
-| Spanner | 50ms | 94% | 1,143 mJ | ~879x |
-| CockroachDB (global) | 200ms | 99% | 4,443 mJ | ~3,418x |
+| Rhizo (coord-free) | 0.002ms | 0% | 0.16 mJ | 1x (measured) |
+| etcd (local) | 0.80ms | 0% | 52 mJ | ~325x |
+| CockroachDB (zone) | 2ms | 25% | 87 mJ | ~544x |
+| Calvin | 10ms | 75% | 263 mJ | ~1,644x |
+| Spanner | 50ms | 94% | 1,143 mJ | ~7,144x |
+| CockroachDB (global) | 200ms | 99% | 4,443 mJ | ~27,769x |
 
-*Note: etcd at localhost has latency < $T_c$, so Wait% = 0 (all compute). At WAN latencies, waiting dominates.*
+*Note: Rhizo energy (0.16 mJ) is measured; other energies derived from model. etcd at localhost has latency < $T_c$, so Wait% = 0 (all compute). At WAN latencies, waiting dominates.*
 
-These comparisons are structurally favorable to coordination-free systems—by design. Coordinated systems provide stronger guarantees (linearizability, global ordering) that are necessary for certain workloads. The point is not that coordination is always wrong, but that it has a quantifiable energy cost that grows with latency. For algebraic operations that can be classified as coordination-free, the energy savings are substantial—and the advantage grows from 50x at localhost to 3,400x at global scale.
+These comparisons are structurally favorable to coordination-free systems—by design. Coordinated systems provide stronger guarantees (linearizability, global ordering) that are necessary for certain workloads. The point is not that coordination is always wrong, but that it has a quantifiable energy cost that grows with latency. For algebraic operations that can be classified as coordination-free, the energy savings are substantial—ranging from 325x at localhost to 28,000x at global scale.
 
 ---
 
